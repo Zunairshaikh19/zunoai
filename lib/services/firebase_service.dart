@@ -107,7 +107,7 @@ class FirebaseService {
       coins: initialCoins,
     );
 
-    await _firestore.collection('users').doc(user.uid).set(newUser.toMap());
+    await _firestore.collection('users').doc(user.uid).set(newUser.toMap(), SetOptions(merge: true));
 
     if (referredBy != null && referredBy.isNotEmpty) {
       final inviterQuery = await _firestore
@@ -162,13 +162,23 @@ class FirebaseService {
   }
 
   Future<void> updateLastActivity(String uid) async {
-    await _firestore.collection('users').doc(uid).update({
-      'lastActivity': FieldValue.serverTimestamp(),
-    });
+    try {
+      await _firestore.collection('users').doc(uid).set({
+        'lastActivity': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      print("Error updating last activity: $e");
+    }
   }
 
   Future<void> updateFcmToken(String uid, String? token) async {
-    await _firestore.collection('users').doc(uid).update({'fcmToken': token});
+    try {
+      await _firestore.collection('users').doc(uid).set({
+        'fcmToken': token,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      print("Error updating FCM token: $e");
+    }
   }
 
   // --- Dashboard Data ---

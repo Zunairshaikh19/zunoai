@@ -56,14 +56,18 @@ class UserNotifier extends StateNotifier<AsyncValue<UserModel?>> {
         // Handle case where user is in Auth but no profile exists
         final authUser = _ref.read(authStateProvider).value;
         if (authUser != null) {
-          await _firebaseService.createUserProfile(authUser);
+          try {
+            await _firebaseService.createUserProfile(authUser);
+          } catch (e) {
+            debugPrint("Error creating user profile: $e");
+          }
         }
       }
     }, onError: (err) {
       state = AsyncValue.error(err, StackTrace.current);
     });
 
-    // Update last activity only ONCE per session to save reads/writes
+    // Update last activity safely
     _firebaseService.updateLastActivity(uid);
   }
 
