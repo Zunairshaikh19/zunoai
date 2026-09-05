@@ -51,10 +51,7 @@ class ApiService {
               {"text": "Generate an image: $prompt"}
             ]
           }
-        ],
-        "generationConfig": {
-          "responseMimeType": "image/jpeg"
-        }
+        ]
       });
 
       final response = await http.post(
