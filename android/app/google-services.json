@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "31792471355",
+    "project_id": "zunoai-b924f",
+    "storage_bucket": "zunoai-b924f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:31792471355:android:f78fd4b5039fb4ac576b1e",
+        "android_client_info": {
+          "package_name": "com.example.zunoai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApZ8D-OQ74jLd5naZQnYp5daBfpD_eBjc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
