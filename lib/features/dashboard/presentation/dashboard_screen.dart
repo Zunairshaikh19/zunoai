@@ -167,22 +167,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             loading: () => const SizedBox(),
             error: (_, __) => const SizedBox(),
           ),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.electricLime,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.electricLime.withOpacity(0.3),
-                  blurRadius: 10,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
-            child: const FaIcon(FontAwesomeIcons.plus, color: Colors.black, size: 18),
-          ),
         ],
       ),
     );
