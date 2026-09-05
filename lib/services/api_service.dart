@@ -12,21 +12,33 @@ class ApiService {
     required String prompt,
     required File referenceImage,
   }) async {
-    // Attempt 1: Google AI Studio :generateImages method
-    String? result = await _generateWithGenerateImages(prompt);
-    if (result != null) return result;
+    // Model candidates in order
+    final models = [
+      'imagen-3.0-generate-002',
+      'imagen-3.0-fast-generate-001',
+      'imagen-3.0-generate-001',
+    ];
 
-    // Attempt 2: Fallback to :predict method
-    result = await _generateWithPredict(prompt);
-    if (result != null) return result;
+    for (final model in models) {
+      // Try :generateImages method
+      String? result = await _tryGenerateImages(model, prompt);
+      if (result != null) return result;
+
+      // Try :predict method
+      result = await _tryPredict(model, prompt);
+      if (result != null) return result;
+    }
+
+    // Log available models for debugging
+    await _listAvailableModels();
 
     return null;
   }
 
-  Future<String?> _generateWithGenerateImages(String prompt) async {
+  Future<String?> _tryGenerateImages(String model, String prompt) async {
     try {
       final uri = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:generateImages?key=$apiKey',
+        'https://generativelanguage.googleapis.com/v1beta/models/$model:generateImages?key=$apiKey',
       );
 
       final body = jsonEncode({
@@ -46,7 +58,6 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        
         String? base64Image;
         if (data['generatedImages'] != null && (data['generatedImages'] as List).isNotEmpty) {
           base64Image = data['generatedImages'][0]['image']['imageBytes'];
@@ -58,18 +69,18 @@ class ApiService {
           return await _uploadBase64ToImgBB(base64Image);
         }
       } else {
-        print("generateImages Failed: ${response.statusCode} - ${response.body}");
+        print("Model $model (:generateImages) -> Status ${response.statusCode}: ${response.body}");
       }
     } catch (e) {
-      print("generateImages Exception: $e");
+      print("Model $model (:generateImages) Exception: $e");
     }
     return null;
   }
 
-  Future<String?> _generateWithPredict(String prompt) async {
+  Future<String?> _tryPredict(String model, String prompt) async {
     try {
       final uri = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=$apiKey',
+        'https://generativelanguage.googleapis.com/v1beta/models/$model:predict?key=$apiKey',
       );
 
       final body = jsonEncode({
@@ -96,12 +107,32 @@ class ApiService {
           return await _uploadBase64ToImgBB(base64Image);
         }
       } else {
-        print("predict Failed: ${response.statusCode} - ${response.body}");
+        print("Model $model (:predict) -> Status ${response.statusCode}: ${response.body}");
       }
     } catch (e) {
-      print("predict Exception: $e");
+      print("Model $model (:predict) Exception: $e");
     }
     return null;
+  }
+
+  Future<void> _listAvailableModels() async {
+    try {
+      final uri = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey');
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        print("=== AVAILABLE MODELS FOR THIS API KEY ===");
+        if (data['models'] != null) {
+          for (var m in data['models']) {
+            print("Model: ${m['name']} | Methods: ${m['supportedGenerationMethods']}");
+          }
+        }
+      } else {
+        print("ListModels Failed: ${response.statusCode} - ${response.body}");
+      }
+    } catch (e) {
+      print("ListModels Exception: $e");
+    }
   }
 
   Future<String?> _uploadBase64ToImgBB(String base64Image) async {
