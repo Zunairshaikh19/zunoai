@@ -56,6 +56,9 @@ class HistoryScreen extends ConsumerWidget {
                     child: ElevatedButton(
                       onPressed: () {
                         ref.read(rootIndexProvider.notifier).state = 0; // Go to Explore
+                        if (Navigator.canPop(context)) {
+                          Navigator.pop(context);
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.electricLime,

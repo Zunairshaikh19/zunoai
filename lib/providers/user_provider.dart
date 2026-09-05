@@ -59,7 +59,7 @@ class UserNotifier extends StateNotifier<AsyncValue<UserModel?>> {
           try {
             await _firebaseService.createUserProfile(authUser);
           } catch (e) {
-            debugPrint("Error creating user profile: $e");
+            print("Error creating user profile: $e");
           }
         }
       }

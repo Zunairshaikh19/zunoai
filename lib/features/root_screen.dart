@@ -2,7 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dashboard/presentation/dashboard_screen.dart';
-import 'generation/presentation/history_screen.dart';
+import 'saved/presentation/saved_list_screen.dart';
 import 'profile/presentation/profile_screen.dart';
 import '../core/theme/app_colors.dart';
 import '../providers/root_index_provider.dart';
@@ -13,7 +13,7 @@ class RootScreen extends ConsumerWidget {
 
   final List<Widget> _screens = const [
     DashboardScreen(),
-    HistoryScreen(),
+    SavedListScreen(),
     ProfileScreen(),
   ];
 
@@ -70,8 +70,8 @@ class _FloatingNavBar extends StatelessWidget {
                     onTap: () => onTap(0),
                   ),
                   _NavBarItem(
-                    icon: FontAwesomeIcons.solidClock,
-                    label: "History",
+                    icon: FontAwesomeIcons.bookmark,
+                    label: "Saved List",
                     isSelected: selectedIndex == 1,
                     onTap: () => onTap(1),
                   ),

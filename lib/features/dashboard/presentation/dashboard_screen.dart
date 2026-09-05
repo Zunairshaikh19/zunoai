@@ -10,6 +10,8 @@ import '../../../models/image_prompt.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../detail/presentation/detail_screen.dart';
 import '../../monetization/presentation/coin_store_screen.dart';
+import '../../generation/presentation/history_screen.dart';
+import '../../../providers/saved_prompts_provider.dart';
 
 import '../../../services/local_cache_service.dart';
 
@@ -167,6 +169,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             loading: () => const SizedBox(),
             error: (_, __) => const SizedBox(),
           ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const HistoryScreen()),
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white10),
+              ),
+              child: const FaIcon(FontAwesomeIcons.clockRotateLeft, color: Colors.white, size: 16),
+            ),
+          ),
         ],
       ),
     );
@@ -243,15 +261,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-class _ImageCard extends StatelessWidget {
+class _ImageCard extends ConsumerWidget {
   final ImagePrompt prompt;
   final int index;
   const _ImageCard({required this.prompt, required this.index});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // Variable heights for masonry effect
     final height = (index % 3 + 2.5) * 60.0;
+    final savedPrompts = ref.watch(savedPromptsProvider);
+    final isSaved = savedPrompts.any((p) => p.id == prompt.id);
 
     return GestureDetector(
       onTap: () => Navigator.push(
@@ -275,13 +295,33 @@ class _ImageCard extends StatelessWidget {
                 Positioned(
                   top: 12,
                   right: 12,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.4),
-                      shape: BoxShape.circle,
+                  child: GestureDetector(
+                    onTap: () {
+                      ref.read(savedPromptsProvider.notifier).toggleSave(prompt);
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            isSaved ? "Removed from Saved List" : "Added to Saved List",
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          duration: const Duration(seconds: 1),
+                          backgroundColor: isSaved ? Colors.grey[800] : AppColors.electricLime,
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isSaved ? AppColors.electricLime : Colors.black.withOpacity(0.4),
+                        shape: BoxShape.circle,
+                      ),
+                      child: FaIcon(
+                        isSaved ? FontAwesomeIcons.solidBookmark : FontAwesomeIcons.bookmark,
+                        color: isSaved ? Colors.black : Colors.white,
+                        size: 14,
+                      ),
                     ),
-                    child: const FaIcon(FontAwesomeIcons.bookmark, color: Colors.white, size: 14),
                   ),
                 ),
               ],
