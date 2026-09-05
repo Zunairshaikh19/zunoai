@@ -12,26 +12,88 @@ class ApiService {
     required String prompt,
     required File referenceImage,
   }) async {
-    // Model candidates in order
-    final models = [
-      'imagen-3.0-generate-002',
-      'imagen-3.0-fast-generate-001',
-      'imagen-3.0-generate-001',
+    // Models with generateContent for image generation from user's API key
+    final imageModels = [
+      'gemini-2.5-flash-image',
+      'gemini-3.1-flash-image',
+      'gemini-3-pro-image',
     ];
 
-    for (final model in models) {
-      // Try :generateImages method
-      String? result = await _tryGenerateImages(model, prompt);
-      if (result != null) return result;
-
-      // Try :predict method
-      result = await _tryPredict(model, prompt);
+    for (final model in imageModels) {
+      String? result = await _tryGenerateContent(model, prompt);
       if (result != null) return result;
     }
 
-    // Log available models for debugging
-    await _listAvailableModels();
+    // Fallback to Imagen 3 if available
+    final imagenModels = [
+      'imagen-3.0-generate-002',
+      'imagen-3.0-fast-generate-001',
+    ];
 
+    for (final model in imagenModels) {
+      String? result = await _tryGenerateImages(model, prompt);
+      if (result != null) return result;
+    }
+
+    return null;
+  }
+
+  Future<String?> _tryGenerateContent(String model, String prompt) async {
+    try {
+      final uri = Uri.parse(
+        'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey',
+      );
+
+      final body = jsonEncode({
+        "contents": [
+          {
+            "parts": [
+              {"text": "Generate an image: $prompt"}
+            ]
+          }
+        ],
+        "generationConfig": {
+          "responseMimeType": "image/jpeg"
+        }
+      });
+
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        String? base64Image;
+
+        if (data['candidates'] != null && (data['candidates'] as List).isNotEmpty) {
+          final candidate = data['candidates'][0];
+          final parts = candidate['content']?['parts'] as List?;
+          if (parts != null) {
+            for (var part in parts) {
+              if (part['inlineData'] != null && part['inlineData']['data'] != null) {
+                base64Image = part['inlineData']['data'];
+                break;
+              } else if (part['inline_data'] != null && part['inline_data']['data'] != null) {
+                base64Image = part['inline_data']['data'];
+                break;
+              }
+            }
+          }
+        }
+
+        if (base64Image != null && base64Image.isNotEmpty) {
+          return await _uploadBase64ToImgBB(base64Image);
+        } else {
+          print("Model $model response did not contain inlineData image: ${response.body}");
+        }
+      } else {
+        print("Model $model (:generateContent) -> Status ${response.statusCode}: ${response.body}");
+      }
+    } catch (e) {
+      print("Model $model (:generateContent) Exception: $e");
+    }
     return null;
   }
 
@@ -61,8 +123,6 @@ class ApiService {
         String? base64Image;
         if (data['generatedImages'] != null && (data['generatedImages'] as List).isNotEmpty) {
           base64Image = data['generatedImages'][0]['image']['imageBytes'];
-        } else if (data['predictions'] != null && (data['predictions'] as List).isNotEmpty) {
-          base64Image = data['predictions'][0]['bytesBase64Encoded'];
         }
 
         if (base64Image != null && base64Image.isNotEmpty) {
@@ -75,64 +135,6 @@ class ApiService {
       print("Model $model (:generateImages) Exception: $e");
     }
     return null;
-  }
-
-  Future<String?> _tryPredict(String model, String prompt) async {
-    try {
-      final uri = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/$model:predict?key=$apiKey',
-      );
-
-      final body = jsonEncode({
-        "instances": [
-          {"prompt": prompt}
-        ],
-        "parameters": {
-          "sampleCount": 1,
-          "aspectRatio": "1:1",
-          "outputMimeType": "image/jpeg"
-        }
-      });
-
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: body,
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['predictions'] != null && (data['predictions'] as List).isNotEmpty) {
-          final String base64Image = data['predictions'][0]['bytesBase64Encoded'];
-          return await _uploadBase64ToImgBB(base64Image);
-        }
-      } else {
-        print("Model $model (:predict) -> Status ${response.statusCode}: ${response.body}");
-      }
-    } catch (e) {
-      print("Model $model (:predict) Exception: $e");
-    }
-    return null;
-  }
-
-  Future<void> _listAvailableModels() async {
-    try {
-      final uri = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey');
-      final response = await http.get(uri);
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        print("=== AVAILABLE MODELS FOR THIS API KEY ===");
-        if (data['models'] != null) {
-          for (var m in data['models']) {
-            print("Model: ${m['name']} | Methods: ${m['supportedGenerationMethods']}");
-          }
-        }
-      } else {
-        print("ListModels Failed: ${response.statusCode} - ${response.body}");
-      }
-    } catch (e) {
-      print("ListModels Exception: $e");
-    }
   }
 
   Future<String?> _uploadBase64ToImgBB(String base64Image) async {
