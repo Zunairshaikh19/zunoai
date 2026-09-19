@@ -17,6 +17,7 @@ import '../../../core/utils/app_snackbar.dart';
 import '../../../models/user_model.dart';
 import 'daily_streak_banner.dart';
 import 'native_ad_card.dart';
+import 'gender_picker_sheet.dart';
 
 final localCacheServiceProvider = Provider((ref) => LocalCacheService());
 final selectedCategoryProvider = StateProvider<String>((ref) => "All");
@@ -56,10 +57,20 @@ final promptsProvider = AsyncNotifierProvider<PromptsNotifier, List<ImagePrompt>
 final filteredPromptsProvider = Provider<AsyncValue<List<ImagePrompt>>>((ref) {
   final promptsAsync = ref.watch(promptsProvider);
   final category = ref.watch(selectedCategoryProvider);
+  final userGender = ref.watch(userProvider).value?.gender;
 
   return promptsAsync.whenData((prompts) {
-    if (category == "All") return prompts;
-    return prompts.where((p) => p.category == category).toList();
+    var result = prompts.where((p) {
+      // No gender chosen yet (or 'unisex') sees everything; otherwise hide
+      // prompts tagged for the other gender. 'couple' always shows.
+      if (userGender == null || userGender == 'unisex') return true;
+      return p.gender == userGender || p.gender == 'unisex' || p.gender == 'couple';
+    }).toList();
+
+    if (category != "All") {
+      result = result.where((p) => p.category == category).toList();
+    }
+    return result;
   });
 });
 
@@ -71,6 +82,10 @@ class DashboardScreen extends ConsumerWidget {
     final filteredPromptsAsync = ref.watch(filteredPromptsProvider);
     final allPrompts = ref.watch(promptsProvider).value ?? [];
     final isPremium = ref.watch(userProvider).value?.tier == UserTier.paid;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (context.mounted) GenderPickerSheet.showIfNeeded(context, ref);
+    });
 
     return Scaffold(
       backgroundColor: AppColors.background,

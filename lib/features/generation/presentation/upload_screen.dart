@@ -20,9 +20,14 @@ import '../../../services/ad_service.dart';
 import '../../../models/user_model.dart';
 import '../../../providers/root_index_provider.dart';
 import '../../../core/widgets/zuno_watermark_badge.dart';
+import '../../../core/widgets/insufficient_coins_sheet.dart';
 
 class GenerationState {
   final File? referenceImage;
+  final File? referenceImage2;
+  // For a 'couple' prompt: true = one photo with both people together,
+  // false = two separate solo photos (referenceImage + referenceImage2).
+  final bool coupleTogether;
   final bool isGenerating;
   final bool isDownloading;
   final String? resultUrl;
@@ -33,6 +38,8 @@ class GenerationState {
 
   const GenerationState({
     this.referenceImage,
+    this.referenceImage2,
+    this.coupleTogether = true,
     this.isGenerating = false,
     this.isDownloading = false,
     this.resultUrl,
@@ -44,18 +51,23 @@ class GenerationState {
 
   GenerationState copyWith({
     File? referenceImage,
+    File? referenceImage2,
+    bool? coupleTogether,
     bool? isGenerating,
     bool? isDownloading,
     String? resultUrl,
     String? errorMessage,
     bool clearResult = false,
     bool clearImage = false,
+    bool clearImage2 = false,
     bool? watermarkRemoved,
     bool? hasClaimedShareReward,
     bool? isUnlockingWatermark,
   }) {
     return GenerationState(
       referenceImage: clearImage ? null : (referenceImage ?? this.referenceImage),
+      referenceImage2: clearImage2 ? null : (referenceImage2 ?? this.referenceImage2),
+      coupleTogether: coupleTogether ?? this.coupleTogether,
       isGenerating: isGenerating ?? this.isGenerating,
       isDownloading: isDownloading ?? this.isDownloading,
       resultUrl: clearResult ? null : (resultUrl ?? this.resultUrl),
@@ -75,6 +87,19 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
     state = state.copyWith(referenceImage: image, errorMessage: null);
   }
 
+  void setImage2(File image) {
+    state = state.copyWith(referenceImage2: image, errorMessage: null);
+  }
+
+  void setCoupleTogether(bool together) {
+    // Switching mode invalidates whichever photo(s) no longer apply.
+    state = state.copyWith(
+      coupleTogether: together,
+      clearImage: true,
+      clearImage2: true,
+    );
+  }
+
   void resetResult() {
     state = state.copyWith(clearResult: true, errorMessage: null);
   }
@@ -82,6 +107,9 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
   Future<void> generate(ImagePrompt prompt) async {
     final image = state.referenceImage;
     if (image == null) return;
+    final isCouple = prompt.gender == 'couple';
+    final needsSecondImage = isCouple && !state.coupleTogether;
+    if (needsSecondImage && state.referenceImage2 == null) return;
 
     state = state.copyWith(isGenerating: true, errorMessage: null);
 
@@ -110,6 +138,8 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
       final result = await _ref.read(firebaseServiceProvider).generateImageSecurely(
         prompt: finalPrompt,
         referenceImage: image,
+        referenceImage2: needsSecondImage ? state.referenceImage2 : null,
+        templateImageUrl: prompt.imageUrl,
       );
 
       if (result != null && result.isNotEmpty) {
@@ -217,7 +247,7 @@ class UploadScreen extends ConsumerWidget {
   final ImagePrompt prompt;
   const UploadScreen({super.key, required this.prompt});
 
-  Future<void> _pickImage(BuildContext context, WidgetRef ref, ImageSource source) async {
+  Future<void> _pickImage(BuildContext context, WidgetRef ref, ImageSource source, {bool slot2 = false}) async {
     final picker = ImagePicker();
     // Downscale before upload — an uncompressed camera photo can be 4000px+
     // and several MB, which slows the round trip to the AI backend for no
@@ -229,11 +259,16 @@ class UploadScreen extends ConsumerWidget {
       imageQuality: 80,
     );
     if (pickedFile != null) {
-      ref.read(generationNotifierProvider.notifier).setImage(File(pickedFile.path));
+      final notifier = ref.read(generationNotifierProvider.notifier);
+      if (slot2) {
+        notifier.setImage2(File(pickedFile.path));
+      } else {
+        notifier.setImage(File(pickedFile.path));
+      }
     }
   }
 
-  void _showPicker(BuildContext context, WidgetRef ref) {
+  void _showPicker(BuildContext context, WidgetRef ref, {bool slot2 = false}) {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.surface,
@@ -247,7 +282,7 @@ class UploadScreen extends ConsumerWidget {
               leading: const Icon(Icons.photo_library, color: AppColors.electricLime),
               title: const Text('Gallery'),
               onTap: () {
-                _pickImage(context, ref, ImageSource.gallery);
+                _pickImage(context, ref, ImageSource.gallery, slot2: slot2);
                 Navigator.of(context).pop();
               },
             ),
@@ -255,12 +290,48 @@ class UploadScreen extends ConsumerWidget {
               leading: const Icon(Icons.photo_camera, color: AppColors.electricLime),
               title: const Text('Camera'),
               onTap: () {
-                _pickImage(context, ref, ImageSource.camera);
+                _pickImage(context, ref, ImageSource.camera, slot2: slot2);
                 Navigator.of(context).pop();
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _uploadBox(BuildContext context, WidgetRef ref, {File? image, required String label, required bool slot2, double height = 300}) {
+    return GestureDetector(
+      onTap: () => _showPicker(context, ref, slot2: slot2),
+      child: Container(
+        width: double.infinity,
+        height: height,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: image == null
+            ? Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  FaIcon(
+                    FontAwesomeIcons.cloudArrowUp,
+                    size: height > 200 ? 48 : 32,
+                    color: AppColors.electricLime.withValues(alpha: 0.5),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white38, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              )
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: Image.file(image, fit: BoxFit.cover),
+              ),
       ),
     );
   }
@@ -281,6 +352,10 @@ class UploadScreen extends ConsumerWidget {
     }
 
     final image = genState.referenceImage;
+    final isCouple = prompt.gender == 'couple';
+    final canGenerate = isCouple && !genState.coupleTogether
+        ? (image != null && genState.referenceImage2 != null)
+        : image != null;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -299,43 +374,67 @@ class UploadScreen extends ConsumerWidget {
           children: [
             _PromptCard(prompt: prompt),
             const SizedBox(height: 32),
-            const Text(
-              "Add Reference Image",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Text(
+              isCouple ? "Add Photos" : "Add Reference Image",
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: () => _showPicker(context, ref),
-              child: Container(
-                width: double.infinity,
-                height: 300,
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white10),
-                ),
-                child: image == null
-                    ? Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          FaIcon(
-                            FontAwesomeIcons.cloudArrowUp,
-                            size: 48,
-                            color: AppColors.electricLime.withValues(alpha: 0.5),
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            "Tap to upload your photo",
-                            style: TextStyle(color: Colors.white38, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      )
-                    : ClipRRect(
-                        borderRadius: BorderRadius.circular(24),
-                        child: Image.file(image, fit: BoxFit.cover),
-                      ),
+            if (isCouple) ...[
+              const SizedBox(height: 4),
+              const Text(
+                "This style needs two people.",
+                style: TextStyle(color: Colors.white38, fontSize: 13),
               ),
-            ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ChoiceChip(
+                      label: const Text("We're together in one photo"),
+                      selected: genState.coupleTogether,
+                      onSelected: (_) => ref.read(generationNotifierProvider.notifier).setCoupleTogether(true),
+                      selectedColor: AppColors.electricLime,
+                      labelStyle: TextStyle(
+                        color: genState.coupleTogether ? Colors.black : Colors.white70,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ChoiceChip(
+                      label: const Text("Separate photos"),
+                      selected: !genState.coupleTogether,
+                      onSelected: (_) => ref.read(generationNotifierProvider.notifier).setCoupleTogether(false),
+                      selectedColor: AppColors.electricLime,
+                      labelStyle: TextStyle(
+                        color: !genState.coupleTogether ? Colors.black : Colors.white70,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ] else
+              const SizedBox(height: 12),
+            if (isCouple && !genState.coupleTogether)
+              Row(
+                children: [
+                  Expanded(child: _uploadBox(context, ref, image: image, label: "Photo 1", slot2: false, height: 220)),
+                  const SizedBox(width: 12),
+                  Expanded(child: _uploadBox(context, ref, image: genState.referenceImage2, label: "Photo 2", slot2: true, height: 220)),
+                ],
+              )
+            else
+              _uploadBox(
+                context,
+                ref,
+                image: image,
+                label: isCouple ? "Tap to upload your photo together" : "Tap to upload your photo",
+                slot2: false,
+              ),
             const SizedBox(height: 40),
             if (genState.isGenerating)
               const _AiProgressIndicator()
@@ -344,9 +443,9 @@ class UploadScreen extends ConsumerWidget {
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: image == null
-                      ? null
-                      : () => ref.read(generationNotifierProvider.notifier).generate(prompt),
+                  onPressed: canGenerate
+                      ? () => ref.read(generationNotifierProvider.notifier).generate(prompt)
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.electricLime,
                     foregroundColor: Colors.black,
@@ -648,15 +747,25 @@ class _ResultView extends ConsumerWidget {
                   onPressed: genState.isUnlockingWatermark
                       ? null
                       : () async {
-                          final unlocked = await ref
-                              .read(generationNotifierProvider.notifier)
-                              .unlockWatermark(config.watermarkRemovalCost);
-                          if (context.mounted) {
-                            if (unlocked) {
-                              AppSnackBar.showSuccess(context, "Watermark removed!");
-                            } else {
-                              AppSnackBar.showError(context, "Not enough coins.");
+                          final notifier = ref.read(generationNotifierProvider.notifier);
+                          var unlocked = await notifier.unlockWatermark(config.watermarkRemovalCost);
+
+                          if (!unlocked && context.mounted) {
+                            // Not enough coins — offer to watch an ad for more,
+                            // or go premium. If they earn enough via the ad,
+                            // retry the unlock right away.
+                            final gotCoins = await InsufficientCoinsSheet.show(
+                              context,
+                              actionLabel: "Removing the watermark",
+                              cost: config.watermarkRemovalCost,
+                            );
+                            if (gotCoins) {
+                              unlocked = await notifier.unlockWatermark(config.watermarkRemovalCost);
                             }
+                          }
+
+                          if (context.mounted && unlocked) {
+                            AppSnackBar.showSuccess(context, "Watermark removed!");
                           }
                         },
                   icon: genState.isUnlockingWatermark

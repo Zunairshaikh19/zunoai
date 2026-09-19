@@ -119,7 +119,7 @@ serve(async (req) => {
       );
     }
 
-    const { prompt, referenceImageBase64 } = await req.json();
+    const { prompt, referenceImageBase64, referenceImageBase64_2, templateImageUrl } = await req.json();
     if (!prompt) {
       return new Response(
         JSON.stringify({ success: false, error: "Prompt is required" }),
@@ -171,14 +171,26 @@ serve(async (req) => {
 
     // 5. Generate the image via OpenRouter — the reference photo (if any) is
     // sent alongside the prompt so the model conditions on the user's actual
-    // face/photo instead of generating something generic. The model itself
-    // is whatever the admin picked in settings/config.generationModel, so
-    // switching providers/models never needs a redeploy.
+    // face/photo instead of generating something generic. When the gallery
+    // template's own image is available (templateImageUrl), it's sent too so
+    // the model copies its exact pose/clothing/background/composition instead
+    // of freely reinterpreting the text prompt — this is what keeps a user's
+    // result looking like the template they picked, not a different render
+    // each time. The model itself is whatever the admin picked in
+    // settings/config.generationModel, so switching providers/models never
+    // needs a redeploy.
     let imageUrl: string | null = null;
     let lastError: string | null = null;
 
     for (let attempt = 0; attempt < 2 && !imageUrl; attempt++) {
-      const result = await tryGenerateViaOpenRouter(model, prompt, apiKey, referenceImageBase64);
+      const result = await tryGenerateViaOpenRouter(
+        model,
+        prompt,
+        apiKey,
+        referenceImageBase64,
+        referenceImageBase64_2,
+        templateImageUrl
+      );
       imageUrl = result.imageUrl;
       lastError = result.error;
     }
@@ -227,21 +239,60 @@ async function tryGenerateViaOpenRouter(
   model: string,
   prompt: string,
   apiKey: string,
-  referenceImageBase64?: string
+  referenceImageBase64?: string,
+  referenceImageBase64_2?: string,
+  templateImageUrl?: string
 ): Promise<{ imageUrl: string | null; error: string | null }> {
   try {
     const content: Record<string, unknown>[] = [];
-    if (referenceImageBase64) {
-      content.push({
-        type: "text",
-        text: `Using the person in the provided image as the subject, transform them into: ${prompt}. Keep the person's identity and facial features recognizable.`,
-      });
+    const hasTemplate = !!templateImageUrl;
+    const hasImage1 = !!referenceImageBase64;
+    const hasImage2 = !!referenceImageBase64_2;
+
+    // Build the instruction text first, tailored to exactly which images are
+    // being sent, then push the images in the same order the text refers to
+    // them by ("the template image", "the first/second photo").
+    let text: string;
+    if (hasTemplate && hasImage1 && hasImage2) {
+      // Couple prompt, two separate photos: swap two faces into the template
+      // while keeping the template's own pose/clothing/background/composition.
+      text =
+        `Image 1 is a reference template showing two people together. Image 2 and Image 3 are real photos of two different people. ` +
+        `Recreate Image 1 exactly — same pose, clothing style, background, lighting, composition and framing — but replace the two subjects' faces and identities: ` +
+        `the person in Image 2 becomes the first/left subject, and the person in Image 3 becomes the second/right subject. ` +
+        `Preserve each person's real facial features, skin tone, and apparent gender exactly as shown in their own photo — do not swap, blend, or alter their gender presentation. ` +
+        `Style notes: ${prompt}`;
+    } else if (hasTemplate && hasImage1) {
+      // Single subject (or a couple already together in one photo) matched
+      // against a template image.
+      text =
+        `Image 1 is a reference template image. Image 2 is a real photo of the actual person (or people) to feature. ` +
+        `Recreate Image 1 exactly — same pose, clothing style, background, lighting, composition and framing — but replace the subject's face and identity with the person shown in Image 2. ` +
+        `If Image 2 shows two people together, replace both subjects in Image 1 with those same two people, matching them left-to-right as they appear. ` +
+        `Preserve their real facial features, skin tone, and apparent gender exactly as shown in Image 2 — do not alter their gender presentation. ` +
+        `Style notes: ${prompt}`;
+    } else if (hasImage1) {
+      // No template available — fall back to the original text-driven look.
+      text = `Using the person in the provided image as the subject, transform them into: ${prompt}. Keep the person's identity, facial features, and apparent gender recognizable and unchanged.`;
+    } else {
+      text = `Generate an image: ${prompt}`;
+    }
+    content.push({ type: "text", text });
+
+    if (hasTemplate) {
+      content.push({ type: "image_url", image_url: { url: templateImageUrl } });
+    }
+    if (hasImage1) {
       content.push({
         type: "image_url",
         image_url: { url: `data:image/jpeg;base64,${referenceImageBase64}` },
       });
-    } else {
-      content.push({ type: "text", text: `Generate an image: ${prompt}` });
+    }
+    if (hasImage2) {
+      content.push({
+        type: "image_url",
+        image_url: { url: `data:image/jpeg;base64,${referenceImageBase64_2}` },
+      });
     }
 
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {

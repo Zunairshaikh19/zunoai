@@ -25,6 +25,10 @@ class UserModel {
   final int loginStreak;
   final DateTime? lastStreakClaim;
 
+  /// 'male' | 'female' | 'unisex' | null (not chosen yet) — drives which
+  /// prompts show up in this user's gallery.
+  final String? gender;
+
   UserModel({
     required this.uid,
     required this.email,
@@ -43,6 +47,7 @@ class UserModel {
     this.fcmToken,
     this.loginStreak = 0,
     this.lastStreakClaim,
+    this.gender,
   });
 
   factory UserModel.fromMap(Map<String, dynamic> data, String uid) {
@@ -64,6 +69,7 @@ class UserModel {
       fcmToken: data['fcmToken'],
       loginStreak: data['loginStreak'] ?? 0,
       lastStreakClaim: (data['lastStreakClaim'] as Timestamp?)?.toDate(),
+      gender: data['gender'],
     );
   }
 
@@ -85,6 +91,7 @@ class UserModel {
       'fcmToken': fcmToken,
       'loginStreak': loginStreak,
       'lastStreakClaim': lastStreakClaim != null ? Timestamp.fromDate(lastStreakClaim!) : null,
+      'gender': gender,
     };
   }
 
@@ -102,6 +109,7 @@ class UserModel {
     String? fcmToken,
     int? loginStreak,
     DateTime? lastStreakClaim,
+    String? gender,
   }) {
     return UserModel(
       uid: uid,
@@ -121,6 +129,7 @@ class UserModel {
       fcmToken: fcmToken ?? this.fcmToken,
       loginStreak: loginStreak ?? this.loginStreak,
       lastStreakClaim: lastStreakClaim ?? this.lastStreakClaim,
+      gender: gender ?? this.gender,
     );
   }
 }

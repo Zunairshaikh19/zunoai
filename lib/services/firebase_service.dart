@@ -246,6 +246,12 @@ class FirebaseService {
     await _firestore.collection('users').doc(uid).update({'coins': newBalance});
   }
 
+  /// One-time choice (male/female/unisex) that decides which prompts show up
+  /// in this user's gallery.
+  Future<void> updateUserGender(String uid, String gender) async {
+    await _firestore.collection('users').doc(uid).update({'gender': gender});
+  }
+
   Future<void> updateDailyAdCount(String uid, int count) async {
     await _firestore.collection('users').doc(uid).update({'dailyAdsWatched': count});
   }
@@ -388,6 +394,8 @@ class FirebaseService {
   Future<String?> generateImageSecurely({
     required String prompt,
     File? referenceImage,
+    File? referenceImage2,
+    String? templateImageUrl,
   }) async {
     try {
       final user = _auth.currentUser;
@@ -401,6 +409,12 @@ class FirebaseService {
         base64Img = base64Encode(bytes);
       }
 
+      String? base64Img2;
+      if (referenceImage2 != null) {
+        final bytes2 = await referenceImage2.readAsBytes();
+        base64Img2 = base64Encode(bytes2);
+      }
+
       final response = await http.post(
         Uri.parse(_supabaseFunctionUrl),
         headers: {
@@ -410,6 +424,8 @@ class FirebaseService {
         body: jsonEncode({
           'prompt': prompt,
           if (base64Img != null) 'referenceImageBase64': base64Img,
+          if (base64Img2 != null) 'referenceImageBase64_2': base64Img2,
+          if (templateImageUrl != null) 'templateImageUrl': templateImageUrl,
         }),
       ).timeout(
         const Duration(seconds: 60),

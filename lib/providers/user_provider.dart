@@ -136,6 +136,14 @@ class UserNotifier extends StateNotifier<AsyncValue<UserModel?>> {
     return false;
   }
 
+  Future<void> setGender(String gender) async {
+    final current = state.value;
+    if (current != null) {
+      await _firebaseService.updateUserGender(current.uid, gender);
+      state = AsyncValue.data(current.copyWith(gender: gender));
+    }
+  }
+
   Future<void> incrementAdCount() async {
     final current = state.value;
     if (current != null) {
