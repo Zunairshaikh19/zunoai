@@ -30,6 +30,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
+      // Login can be reached either directly (from the auth gate) or one level
+      // deeper via Signup's "already have an account" link, so a single pop
+      // isn't always enough to land back on the real (now authenticated)
+      // dashboard underneath. Unwind the whole auth flow in one shot instead.
+      if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
     } catch (e) {
       if (mounted) {
         AppSnackBar.showError(context, "Login Failed: $e");
@@ -127,6 +132,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           signupBonus: config.signupBonus,
                           referralReward: config.referralReward,
                         );
+                    if (context.mounted) {
+                      Navigator.popUntil(context, (route) => route.isFirst);
+                    }
                   } catch (e) {
                     if (context.mounted) {
                       AppSnackBar.showError(context, "Google Sign-In failed: $e");

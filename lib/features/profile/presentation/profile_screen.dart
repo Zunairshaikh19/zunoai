@@ -99,6 +99,9 @@ class ProfileScreen extends ConsumerWidget {
                 _buildReferralCard(context, user, ref),
                 const SizedBox(height: 32),
                 _buildSettingsList(context, ref),
+                // Clears the floating bottom nav bar (which overlays content
+                // since the Scaffold uses extendBody), so Logout is reachable.
+                const SizedBox(height: 100),
               ],
             ),
           );

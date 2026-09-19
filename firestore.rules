@@ -81,14 +81,31 @@ service cloud.firestore {
       function isReferralCodeBackfill() {
         return isOwner(uid) &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['referralCode']) &&
-          resource.data.referralCode == '' &&
+          // A legacy doc from before this field existed doesn't have the key
+          // at all — accessing a missing map key directly (rather than
+          // guarding with `in` first) errors out the whole rule and denies
+          // the write, so both "missing" and "empty string" must be handled.
+          (!('referralCode' in resource.data) || resource.data.referralCode == '') &&
           request.resource.data.referralCode is string &&
           request.resource.data.referralCode != '';
       }
 
+      // Lets an account whose real profile was never written (a phantom doc
+      // created only by updateLastActivity()/updateFcmToken()'s upsert, with
+      // no real email) get its full profile backfilled in one write — but
+      // only into safe starting values, never into premium/blocked/etc.
+      function isProfileBackfill() {
+        return isOwner(uid) &&
+          (!('email' in resource.data) || resource.data.email == '') &&
+          request.resource.data.email is string &&
+          request.resource.data.email != '' &&
+          request.resource.data.tier == 'free' &&
+          request.resource.data.isBlocked == false;
+      }
+
       // Users may update their own profile, but not grant themselves premium,
       // unblock themselves, or forge their own referral identity.
-      allow update: if isAdmin() || isSelfExpiry() || isReferralCodeBackfill() || (
+      allow update: if isAdmin() || isSelfExpiry() || isReferralCodeBackfill() || isProfileBackfill() || (
         isOwner(uid) &&
         !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(['tier', 'isBlocked', 'referralCode', 'uid', 'email'])

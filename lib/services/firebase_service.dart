@@ -107,6 +107,7 @@ class FirebaseService {
     int signupBonus = 40,
     int referralReward = 40,
   }) async {
+    final docRef = _firestore.collection('users').doc(user.uid);
     final referralCode = const Uuid().v4().substring(0, 8).toUpperCase();
 
     int initialCoins = signupBonus;
@@ -114,18 +115,54 @@ class FirebaseService {
       initialCoins += referralReward;
     }
 
-    final newUser = UserModel(
-      uid: user.uid,
-      email: user.email ?? '',
-      displayName: user.displayName,
-      photoUrl: user.photoURL,
-      referralCode: referralCode,
-      referredBy: referredBy,
-      lastDailyReset: DateTime.now(),
-      coins: initialCoins,
-    );
+    // Runs as a transaction, not a plain read-then-write, for two reasons:
+    // 1. signUp()/signInWithGoogle() and UserNotifier's "no profile yet"
+    //    fallback can both call this for the same brand-new uid at nearly the
+    //    same time; a transaction lets Firestore serialize them so only one
+    //    ever actually creates the profile (with one referral code) instead
+    //    of a plain read-then-write race letting both think they're first.
+    // 2. An unrelated, unawaited write (updateLastActivity()/updateFcmToken(),
+    //    both fired the moment auth state changes) can land first and create
+    //    a *bare partial* doc — Firestore's `.set(merge:true)` upserts. A
+    //    naive "does the doc exist?" check would then see that partial doc
+    //    and skip real profile creation forever, leaving the account with no
+    //    email/referralCode/tier ever written (exactly the bug this fixes).
+    // The check is specifically "does `email` have a real value", not "does
+    // the doc exist" — and any field a concurrent call already wrote onto
+    // that partial doc (coins, dailyAdsWatched, loginStreak, lastStreakClaim,
+    // fcmToken, lastActivity) is read back and preserved rather than reset,
+    // so nothing earned during that race window is lost.
+    final didCreate = await _firestore.runTransaction<bool>((tx) async {
+      final snapshot = await tx.get(docRef);
+      final existingData = snapshot.data();
+      final existingEmail = existingData?['email'] as String?;
+      if (existingEmail != null && existingEmail.isNotEmpty) {
+        return false; // A real profile already exists — never overwrite it.
+      }
 
-    await _firestore.collection('users').doc(user.uid).set(newUser.toMap(), SetOptions(merge: true));
+      final newUser = UserModel(
+        uid: user.uid,
+        email: user.email ?? '',
+        displayName: (existingData?['displayName'] as String?) ?? user.displayName,
+        photoUrl: (existingData?['photoUrl'] as String?) ?? user.photoURL,
+        referralCode: referralCode,
+        referredBy: referredBy,
+        lastDailyReset: DateTime.now(),
+        coins: (existingData?['coins'] as int?) ?? initialCoins,
+        dailyAdsWatched: (existingData?['dailyAdsWatched'] as int?) ?? 0,
+        referralCount: (existingData?['referralCount'] as int?) ?? 0,
+        loginStreak: (existingData?['loginStreak'] as int?) ?? 0,
+        lastStreakClaim: (existingData?['lastStreakClaim'] as Timestamp?)?.toDate(),
+        fcmToken: existingData?['fcmToken'] as String?,
+        lastActivity: (existingData?['lastActivity'] as Timestamp?)?.toDate(),
+      );
+
+      tx.set(docRef, newUser.toMap(), SetOptions(merge: true));
+      return true;
+    });
+
+    if (!didCreate) return;
+
     await _firestore.collection('referralCodes').doc(referralCode).set({'uid': user.uid});
 
     if (referredBy != null && referredBy.isNotEmpty) {

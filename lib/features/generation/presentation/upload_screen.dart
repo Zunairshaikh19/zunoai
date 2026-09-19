@@ -12,13 +12,13 @@ import '../../../providers/economy_provider.dart';
 import '../../../models/history_item.dart';
 import '../../../core/theme/app_colors.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:gal/gal.dart';
 import '../../../core/utils/app_snackbar.dart';
 import '../../../core/utils/watermark.dart';
 import '../../../services/analytics_service.dart';
 import '../../../services/ad_service.dart';
 import '../../../models/user_model.dart';
+import '../../../providers/root_index_provider.dart';
 
 class GenerationState {
   final File? referenceImage;
@@ -145,26 +145,28 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
     }
   }
 
-  /// Returns the bonus coins earned from this share (0 if already claimed
-  /// for this generation), so the caller can show it in a snackbar.
+  /// Saves the result to the device's photo gallery (not a share-sheet hop —
+  /// `Share.shareXFiles` only hands the file to whatever app the user picks
+  /// next, which several apps/actions don't turn into an actual saved photo).
+  /// Returns the bonus coins earned for this (0 if already claimed for this
+  /// generation), so the caller can show it in a snackbar.
   Future<int> downloadAndShareImage() async {
     final url = state.resultUrl;
     if (url == null || url.isEmpty) return 0;
 
     state = state.copyWith(isDownloading: true);
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(Uri.parse(url)).timeout(
+            const Duration(seconds: 30),
+            onTimeout: () => throw "Download timed out. Please try again.",
+          );
       if (response.statusCode == 200) {
-        // A free-tier result stays watermarked in the actual shared/downloaded
-        // file too — only the preview would be trivial to bypass otherwise.
+        // A free-tier result stays watermarked in the actual saved file too —
+        // only the preview would be trivial to bypass otherwise.
         final bytes = state.watermarkRemoved ? response.bodyBytes : await applyWatermark(response.bodyBytes);
         final extension = state.watermarkRemoved ? 'jpg' : 'png';
 
-        final tempDir = await getTemporaryDirectory();
-        final filePath = '${tempDir.path}/ZunoAI_${DateTime.now().millisecondsSinceEpoch}.$extension';
-        final file = File(filePath);
-        await file.writeAsBytes(bytes);
-        await Share.shareXFiles([XFile(filePath)], text: "Created with Zuno AI!");
+        await Gal.putImageBytes(bytes, name: 'ZunoAI_${DateTime.now().millisecondsSinceEpoch}.$extension');
         state = state.copyWith(isDownloading: false);
 
         if (!state.hasClaimedShareReward) {
@@ -181,6 +183,12 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
         );
         return 0;
       }
+    } on GalException catch (e) {
+      state = state.copyWith(
+        isDownloading: false,
+        errorMessage: "Couldn't save to gallery: ${e.type.message}",
+      );
+      return 0;
     } catch (e) {
       state = state.copyWith(
         isDownloading: false,
@@ -551,10 +559,36 @@ class _ResultView extends ConsumerWidget {
     AdService().showInterstitial(() => notifier.resetResult());
   }
 
+  // Header close (X) button: skips back through the prompt/upload screens
+  // entirely and drops the user straight on the dashboard, unlike the back
+  // arrow which only steps back to re-generate with the same prompt.
+  void _closeToDashboard(BuildContext context, WidgetRef ref) {
+    final isPremium = ref.read(userProvider).value?.tier == UserTier.paid;
+    final notifier = ref.read(generationNotifierProvider.notifier);
+
+    void goHome() {
+      notifier.resetResult();
+      ref.read(rootIndexProvider.notifier).state = 0;
+      Navigator.popUntil(context, (route) => route.isFirst);
+    }
+
+    if (isPremium) {
+      goHome();
+    } else {
+      AdService().showInterstitial(goHome);
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final genState = ref.watch(generationNotifierProvider);
     final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+
+    ref.listen<GenerationState>(generationNotifierProvider, (previous, next) {
+      if (next.errorMessage != null && next.errorMessage != previous?.errorMessage) {
+        AppSnackBar.showError(context, next.errorMessage!);
+      }
+    });
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -565,6 +599,13 @@ class _ResultView extends ConsumerWidget {
           icon: const FaIcon(FontAwesomeIcons.chevronLeft, size: 20),
           onPressed: () => _leaveResult(ref),
         ),
+        actions: [
+          IconButton(
+            icon: const FaIcon(FontAwesomeIcons.xmark, size: 20),
+            tooltip: "Close",
+            onPressed: () => _closeToDashboard(context, ref),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -668,8 +709,13 @@ class _ResultView extends ConsumerWidget {
                                 final bonus = await ref
                                     .read(generationNotifierProvider.notifier)
                                     .downloadAndShareImage();
-                                if (bonus > 0 && context.mounted) {
-                                  AppSnackBar.showSuccess(context, "Thanks for sharing! +$bonus coins");
+                                final hasError =
+                                    ref.read(generationNotifierProvider).errorMessage != null;
+                                if (context.mounted && !hasError) {
+                                  AppSnackBar.showSuccess(
+                                    context,
+                                    bonus > 0 ? "Saved to gallery! +$bonus coins" : "Saved to gallery!",
+                                  );
                                 }
                               },
                         icon: genState.isDownloading

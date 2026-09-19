@@ -32,7 +32,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         signupBonus: config.signupBonus,
         referralReward: config.referralReward,
       );
-      if (mounted) Navigator.pop(context);
+      // Signup screen sits on top of Login in the stack, so a single pop only
+      // reveals Login again instead of the real (now authenticated) dashboard
+      // underneath. Unwind the whole auth flow in one shot instead.
+      if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
     } catch (e) {
       if (mounted) {
         AppSnackBar.showError(context, "Signup Failed: $e");
@@ -126,7 +129,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                           signupBonus: config.signupBonus,
                           referralReward: config.referralReward,
                         );
-                    if (mounted) Navigator.pop(context);
+                    if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
                   } catch (e) {
                     if (context.mounted) {
                       AppSnackBar.showError(context, "Google Sign-In failed: $e");
