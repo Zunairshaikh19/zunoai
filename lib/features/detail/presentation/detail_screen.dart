@@ -6,6 +6,10 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../models/image_prompt.dart';
 import '../../../providers/user_provider.dart';
+import '../../../providers/economy_provider.dart';
+import '../../../models/economy_config.dart';
+import '../../../core/widgets/auth_gatekeeper.dart';
+import '../../../core/utils/app_snackbar.dart';
 import '../../generation/presentation/upload_screen.dart';
 import '../../monetization/presentation/coin_dialog.dart';
 
@@ -16,18 +20,30 @@ class DetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(userProvider).value;
+    final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+
+    final categoryText = prompt.category.isNotEmpty ? prompt.category.toUpperCase() : "GENERAL";
+    final hiddenPromptText = prompt.hiddenPrompt.isNotEmpty ? prompt.hiddenPrompt : prompt.category;
+    final maskedPrompt = hiddenPromptText.replaceAll(RegExp(r'\w'), '*');
 
     return Scaffold(
       body: Stack(
         children: [
-          // Background Image
+          // Background Image Isolated with RepaintBoundary
           Positioned.fill(
-            child: CachedNetworkImage(
-              imageUrl: prompt.imageUrl,
-              fit: BoxFit.cover,
+            child: RepaintBoundary(
+              child: CachedNetworkImage(
+                imageUrl: prompt.imageUrl,
+                fit: BoxFit.cover,
+                placeholder: (context, url) => Container(color: Colors.black),
+                errorWidget: (context, url, error) => Container(
+                  color: Colors.grey[900],
+                  child: const Icon(Icons.broken_image, color: Colors.white24, size: 64),
+                ),
+              ),
             ),
           ),
-          // Gradient Overlay
+          // Gradient Overlay using withValues
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
@@ -35,8 +51,8 @@ class DetailScreen extends ConsumerWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withOpacity(0.3),
-                    Colors.black.withOpacity(0.9),
+                    Colors.black.withValues(alpha: 0.3),
+                    Colors.black.withValues(alpha: 0.9),
                   ],
                 ),
               ),
@@ -53,19 +69,20 @@ class DetailScreen extends ConsumerWidget {
                 ),
                 Expanded(
                   child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
                     child: Padding(
                       padding: const EdgeInsets.all(24.0),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.end,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const SizedBox(height: 100), // Push content down
+                          const SizedBox(height: 100),
                           Row(
                             children: [
                               const FaIcon(FontAwesomeIcons.wandMagicSparkles, color: AppColors.electricLime, size: 14),
                               const SizedBox(width: 8),
                               Text(
-                                prompt.category.toUpperCase(),
+                                categoryText,
                                 style: const TextStyle(
                                   color: AppColors.electricLime,
                                   fontWeight: FontWeight.w900,
@@ -91,18 +108,18 @@ class DetailScreen extends ConsumerWidget {
                             child: BackdropFilter(
                               filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                               child: Container(
-                                constraints: const BoxConstraints(maxHeight: 250), // Fixed maximum height
+                                constraints: const BoxConstraints(maxHeight: 250),
                                 width: double.infinity,
                                 padding: const EdgeInsets.all(20),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.05),
+                                  color: Colors.white.withValues(alpha: 0.05),
                                   borderRadius: BorderRadius.circular(24),
                                   border: Border.all(color: Colors.white10),
                                 ),
                                 child: SingleChildScrollView(
                                   physics: const BouncingScrollPhysics(),
                                   child: Text(
-                                    prompt.hiddenPrompt.replaceAll(RegExp(r'\w'), '*'),
+                                    maskedPrompt,
                                     style: const TextStyle(
                                       color: Colors.white60,
                                       fontSize: 16,
@@ -118,8 +135,20 @@ class DetailScreen extends ConsumerWidget {
                             width: double.infinity,
                             height: 64,
                             child: ElevatedButton(
-                              onPressed: () {
-                                if (user != null && user.coins >= 40) {
+                              onPressed: () async {
+                                final allowed = await AuthGatekeeper.checkAndGate(
+                                  context,
+                                  actionName: "Generate AI Artwork",
+                                  isLoggedIn: user != null,
+                                );
+                                if (!allowed || !context.mounted) return;
+
+                                if (user == null) {
+                                  AppSnackBar.showError(context, "Please try again in a moment.");
+                                  return;
+                                }
+
+                                if (user.coins >= config.generationCost) {
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
@@ -145,10 +174,10 @@ class DetailScreen extends ConsumerWidget {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          const Center(
+                          Center(
                             child: Text(
-                              "Costs 40 Zuno Coins",
-                              style: TextStyle(color: Colors.white38, fontSize: 12),
+                              "Costs ${config.generationCost} Zuno Coins",
+                              style: const TextStyle(color: Colors.white38, fontSize: 12),
                             ),
                           ),
                         ],

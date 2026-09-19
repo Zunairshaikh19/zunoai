@@ -71,6 +71,6 @@ class NotificationService {
 
   // Background message handler must be a top-level function
   static Future<void> handleBackgroundMessage(RemoteMessage message) async {
-    print('Handling background message: ${message.messageId}');
+    debugPrint('Handling background message: ${message.messageId}');
   }
 }

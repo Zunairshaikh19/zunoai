@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../providers/user_provider.dart';
+import '../../../providers/economy_provider.dart';
+import '../../../models/economy_config.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/app_snackbar.dart';
 import 'signup_screen.dart';
 import 'forgot_password_screen.dart';
 
@@ -28,9 +31,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _passwordController.text.trim(),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login Failed: $e")),
-      );
+      if (mounted) {
+        AppSnackBar.showError(context, "Login Failed: $e");
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -119,11 +122,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 icon: FontAwesomeIcons.google,
                 onPressed: () async {
                   try {
-                    await ref.read(firebaseServiceProvider).signInWithGoogle();
+                    final config = ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+                    await ref.read(firebaseServiceProvider).signInWithGoogle(
+                          signupBonus: config.signupBonus,
+                          referralReward: config.referralReward,
+                        );
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("Google Sign-In failed: $e")),
-                    );
+                    if (context.mounted) {
+                      AppSnackBar.showError(context, "Google Sign-In failed: $e");
+                    }
                   }
                 },
               ),

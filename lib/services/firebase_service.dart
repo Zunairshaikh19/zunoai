@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
@@ -18,14 +18,16 @@ class FirebaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
 
-  // ImgBB API Key
-  static const String _imgBBKey = "d06e36c9de1d91a12a0c824e8c8837e4";
+  // ImgBB API Key — pass at build time with:
+  //   flutter build ... --dart-define=IMGBB_API_KEY=your_key
+  // (rotate the old key on imgbb.com since it was previously committed to source control)
+  static const String _imgBBKey = String.fromEnvironment('IMGBB_API_KEY');
 
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
   // --- Auth Methods ---
   
-  Future<UserCredential?> signInWithGoogle() async {
+  Future<UserCredential?> signInWithGoogle({int signupBonus = 40, int referralReward = 40}) async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return null;
@@ -37,12 +39,12 @@ class FirebaseService {
       );
 
       final UserCredential userCredential = await _auth.signInWithCredential(credential);
-      
+
       final user = userCredential.user;
       if (user != null) {
         final existingProfile = await getUserData(user.uid);
         if (existingProfile == null) {
-          await createUserProfile(user);
+          await createUserProfile(user, signupBonus: signupBonus, referralReward: referralReward);
         }
       }
       return userCredential;
@@ -50,10 +52,21 @@ class FirebaseService {
       rethrow;
     }
   }
-  
-  Future<UserCredential> signUp(String email, String password, {String? referralCode}) async {
+
+  Future<UserCredential> signUp(
+    String email,
+    String password, {
+    String? referralCode,
+    int signupBonus = 40,
+    int referralReward = 40,
+  }) async {
     final cred = await _auth.createUserWithEmailAndPassword(email: email, password: password);
-    await createUserProfile(cred.user!, referredBy: referralCode);
+    await createUserProfile(
+      cred.user!,
+      referredBy: referralCode,
+      signupBonus: signupBonus,
+      referralReward: referralReward,
+    );
     return cred;
   }
 
@@ -88,12 +101,17 @@ class FirebaseService {
     });
   }
 
-  Future<void> createUserProfile(User user, {String? referredBy}) async {
+  Future<void> createUserProfile(
+    User user, {
+    String? referredBy,
+    int signupBonus = 40,
+    int referralReward = 40,
+  }) async {
     final referralCode = const Uuid().v4().substring(0, 8).toUpperCase();
-    
-    int initialCoins = 40;
+
+    int initialCoins = signupBonus;
     if (referredBy != null && referredBy.isNotEmpty) {
-      initialCoins += 40;
+      initialCoins += referralReward;
     }
 
     final newUser = UserModel(
@@ -108,18 +126,15 @@ class FirebaseService {
     );
 
     await _firestore.collection('users').doc(user.uid).set(newUser.toMap(), SetOptions(merge: true));
+    await _firestore.collection('referralCodes').doc(referralCode).set({'uid': user.uid});
 
     if (referredBy != null && referredBy.isNotEmpty) {
-      final inviterQuery = await _firestore
-          .collection('users')
-          .where('referralCode', isEqualTo: referredBy)
-          .limit(1)
-          .get();
-      
-      if (inviterQuery.docs.isNotEmpty) {
-        final inviterDoc = inviterQuery.docs.first;
-        await _firestore.collection('users').doc(inviterDoc.id).update({
-          'coins': FieldValue.increment(40),
+      final codeDoc = await _firestore.collection('referralCodes').doc(referredBy).get();
+      final inviterUid = codeDoc.data()?['uid'] as String?;
+
+      if (inviterUid != null) {
+        await _firestore.collection('users').doc(inviterUid).update({
+          'coins': FieldValue.increment(referralReward),
           'referralCount': FieldValue.increment(1),
         });
       }
@@ -167,7 +182,7 @@ class FirebaseService {
         'lastActivity': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
-      print("Error updating last activity: $e");
+      debugPrint("Error updating last activity: $e");
     }
   }
 
@@ -177,7 +192,7 @@ class FirebaseService {
         'fcmToken': token,
       }, SetOptions(merge: true));
     } catch (e) {
-      print("Error updating FCM token: $e");
+      debugPrint("Error updating FCM token: $e");
     }
   }
 
@@ -198,27 +213,51 @@ class FirebaseService {
     await _firestore.collection('users').doc(uid).update({'dailyAdsWatched': count});
   }
 
-  Future<void> resetDailyLimits(String uid, int coins) async {
+  Future<void> backfillReferralCode(String uid) async {
+    final code = const Uuid().v4().substring(0, 8).toUpperCase();
+    await _firestore.collection('users').doc(uid).update({'referralCode': code});
+    await _firestore.collection('referralCodes').doc(code).set({'uid': uid});
+  }
+
+  Future<void> claimDailyStreak(String uid, {required int newStreak, required int coins}) async {
     await _firestore.collection('users').doc(uid).update({
-      'coins': coins,
+      'loginStreak': newStreak,
+      'lastStreakClaim': Timestamp.fromDate(DateTime.now()),
+      'coins': FieldValue.increment(coins),
+    });
+  }
+
+  Future<void> expirePremium(String uid) async {
+    await _firestore.collection('users').doc(uid).update({
+      'tier': 'free',
+      'premiumExpiresAt': null,
+    });
+  }
+
+  Future<void> resetDailyLimits(String uid, int dailyBonusCoins) async {
+    // Adds the daily bonus on top of whatever the user already has — a plain
+    // `set` here would wipe out coins they earned from ads/referrals since
+    // their last reset, which is not what "daily bonus" is supposed to mean.
+    await _firestore.collection('users').doc(uid).update({
+      'coins': FieldValue.increment(dailyBonusCoins),
       'dailyAdsWatched': 0,
       'lastDailyReset': Timestamp.fromDate(DateTime.now()),
     });
   }
 
   Future<void> saveToHistory(String uid, HistoryItem item) async {
-    print("Saving history for user: $uid");
+    debugPrint("Saving history for user: $uid");
     try {
       await _firestore.collection('users').doc(uid).collection('history').add(item.toMap());
-      print("History saved successfully.");
+      debugPrint("History saved successfully.");
     } catch (e) {
-      print("Failed to save history: $e");
+      debugPrint("Failed to save history: $e");
       rethrow;
     }
   }
 
   Stream<List<HistoryItem>> historyStream(String uid) {
-    print("Listening to history stream for: $uid");
+    debugPrint("Listening to history stream for: $uid");
     return _firestore
         .collection('users')
         .doc(uid)
@@ -226,7 +265,7 @@ class FirebaseService {
         .orderBy('timestamp', descending: true)
         .snapshots()
         .map((snapshot) {
-          print("Received history update. Count: ${snapshot.docs.length}");
+          debugPrint("Received history update. Count: ${snapshot.docs.length}");
           return snapshot.docs
             .map((doc) => HistoryItem.fromMap(doc.data(), doc.id))
             .toList();
@@ -277,9 +316,84 @@ class FirebaseService {
         .update({'isRead': true});
   }
 
-  Future<String?> getGenerationApiKey() async {
-    final doc = await _firestore.collection('settings').doc('config').get();
-    return doc.data()?['nanoBananaApiKey'];
+  // Supabase Edge Function URL (100% Free & Secure Proxy)
+  static const String _supabaseFunctionUrl = "https://ylenfbneddyuzrkckaul.supabase.co/functions/v1/generate-image";
+  static const String _confirmPurchaseUrl = "https://ylenfbneddyuzrkckaul.supabase.co/functions/v1/confirm-purchase";
+
+  /// Verifies a completed store purchase with the backend and activates the
+  /// user's premium tier there — the client can never set `tier` itself
+  /// (blocked by Firestore rules), since a device could otherwise fake a
+  /// "successful" purchase locally.
+  Future<DateTime> activatePremium({
+    required String productId,
+    required String purchaseToken,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw "User not authenticated";
+    final idToken = await user.getIdToken();
+
+    final response = await http.post(
+      Uri.parse(_confirmPurchaseUrl),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $idToken',
+      },
+      body: jsonEncode({'productId': productId, 'purchaseToken': purchaseToken}),
+    );
+
+    final jsonData = jsonDecode(response.body);
+    if (response.statusCode == 200 && jsonData['success'] == true) {
+      return DateTime.parse(jsonData['premiumExpiresAt'] as String);
+    }
+    throw jsonData['error'] ?? "Failed to activate premium";
+  }
+
+  Future<String?> generateImageSecurely({
+    required String prompt,
+    File? referenceImage,
+  }) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) throw "User not authenticated";
+
+      final idToken = await user.getIdToken();
+
+      String? base64Img;
+      if (referenceImage != null) {
+        final bytes = await referenceImage.readAsBytes();
+        base64Img = base64Encode(bytes);
+      }
+
+      final response = await http.post(
+        Uri.parse(_supabaseFunctionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'prompt': prompt,
+          if (base64Img != null) 'referenceImageBase64': base64Img,
+        }),
+      ).timeout(
+        const Duration(seconds: 60),
+        onTimeout: () => throw "Generation timed out. Please try again.",
+      );
+
+      Map<String, dynamic>? jsonData;
+      try {
+        jsonData = jsonDecode(response.body) as Map<String, dynamic>;
+      } catch (_) {
+        throw "Generation failed. Please try again.";
+      }
+
+      if (response.statusCode == 200 && jsonData['success'] == true) {
+        return jsonData['imageUrl'] as String?;
+      } else {
+        throw jsonData['error'] ?? "Generation failed. Please try again.";
+      }
+    } catch (e) {
+      rethrow;
+    }
   }
 
   // --- Support Chat ---
@@ -314,7 +428,7 @@ class FirebaseService {
         .add(message.toMap());
   }
 
-  Future<void> redeemReferralCode(String uid, String code) async {
+  Future<void> redeemReferralCode(String uid, String code, {int referralReward = 40}) async {
     final userDoc = await _firestore.collection('users').doc(uid).get();
     final userData = userDoc.data();
     
@@ -326,36 +440,32 @@ class FirebaseService {
       throw "You cannot use your own referral code.";
     }
 
-    final inviterQuery = await _firestore
-        .collection('users')
-        .where('referralCode', isEqualTo: code)
-        .limit(1)
-        .get();
+    final codeDoc = await _firestore.collection('referralCodes').doc(code).get();
+    final inviterUid = codeDoc.data()?['uid'] as String?;
 
-    if (inviterQuery.docs.isEmpty) {
+    if (inviterUid == null) {
       throw "Invalid referral code.";
     }
 
-    final inviterDoc = inviterQuery.docs.first;
-
-    final batch = _firestore.batch();
-    batch.update(_firestore.collection('users').doc(uid), {
-      'coins': FieldValue.increment(40),
+    // Written sequentially (not batched) so each write is evaluated against
+    // already-committed state — the security rules verify the referral
+    // relationship by reading the referrer's own `referredBy` field, which
+    // must already exist before the inviter's document can be credited.
+    await _firestore.collection('users').doc(uid).update({
+      'coins': FieldValue.increment(referralReward),
       'referredBy': code,
     });
-    batch.update(_firestore.collection('users').doc(inviterDoc.id), {
-      'coins': FieldValue.increment(40),
+
+    await _firestore.collection('users').doc(inviterUid).update({
+      'coins': FieldValue.increment(referralReward),
       'referralCount': FieldValue.increment(1),
     });
 
-    final noteRef = _firestore.collection('users').doc(inviterDoc.id).collection('notifications').doc();
-    batch.set(noteRef, {
+    await _firestore.collection('users').doc(inviterUid).collection('notifications').add({
       'title': 'Referral Successful! 🎁',
-      'message': 'A friend joined using your code! 40 coins added to your account.',
+      'message': 'A friend joined using your code! $referralReward coins added to your account.',
       'timestamp': FieldValue.serverTimestamp(),
       'isRead': false,
     });
-
-    await batch.commit();
   }
 }

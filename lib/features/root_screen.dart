@@ -6,20 +6,37 @@ import 'saved/presentation/saved_list_screen.dart';
 import 'profile/presentation/profile_screen.dart';
 import '../core/theme/app_colors.dart';
 import '../providers/root_index_provider.dart';
+import '../providers/user_provider.dart';
+import '../models/user_model.dart';
+import '../services/ad_service.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
-class RootScreen extends ConsumerWidget {
+class RootScreen extends ConsumerStatefulWidget {
   const RootScreen({super.key});
 
+  @override
+  ConsumerState<RootScreen> createState() => _RootScreenState();
+}
+
+class _RootScreenState extends ConsumerState<RootScreen> {
   final List<Widget> _screens = const [
     DashboardScreen(),
     SavedListScreen(),
     ProfileScreen(),
   ];
 
+  bool _appOpenAdChecked = false;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final selectedIndex = ref.watch(rootIndexProvider);
+
+    ref.listen<AsyncValue<UserModel?>>(userProvider, (previous, next) {
+      if (_appOpenAdChecked || !next.hasValue) return;
+      _appOpenAdChecked = true;
+      final isPremium = next.value?.tier == UserTier.paid;
+      AdService().maybeShowAppOpenInterstitial(isPremium: isPremium, onDone: () {});
+    });
 
     return Scaffold(
       extendBody: true, // Important for floating nav bar

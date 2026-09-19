@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../models/user_model.dart';
 import '../../../providers/user_provider.dart';
+import '../../../core/utils/app_snackbar.dart';
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../legal/presentation/privacy_policy_screen.dart';
 
@@ -135,13 +136,13 @@ class ProfileScreen extends ConsumerWidget {
       try {
         await ref.read(firebaseServiceProvider).uploadProfilePicture(uid, File(pickedFile.path));
         ref.invalidate(userProvider);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Profile picture updated!")),
-        );
+        if (context.mounted) {
+          AppSnackBar.showSuccess(context, "Profile picture updated!");
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Upload failed: $e")),
-        );
+        if (context.mounted) {
+          AppSnackBar.showError(context, "Upload failed: $e");
+        }
       }
     }
   }
@@ -212,9 +213,7 @@ class ProfileScreen extends ConsumerWidget {
                     icon: const FaIcon(FontAwesomeIcons.copy, size: 18, color: Colors.white70),
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: user.referralCode));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Code copied to clipboard!")),
-                      );
+                      AppSnackBar.showSuccess(context, "Code copied to clipboard!");
                     },
                   ),
                   IconButton(
@@ -270,15 +269,11 @@ class ProfileScreen extends ConsumerWidget {
                 await ref.read(firebaseServiceProvider).redeemReferralCode(uid, controller.text.trim().toUpperCase());
                 if (context.mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Bonus claimed successfully!")),
-                  );
+                  AppSnackBar.showSuccess(context, "Bonus claimed successfully!");
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Error: $e")),
-                  );
+                  AppSnackBar.showError(context, "Error: $e");
                 }
               }
             },

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,94 +6,272 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../models/image_prompt.dart';
+import '../../../models/economy_config.dart';
 import '../../../providers/user_provider.dart';
-import '../../../services/api_service.dart';
+import '../../../providers/economy_provider.dart';
 import '../../../models/history_item.dart';
 import '../../../core/theme/app_colors.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../../core/utils/app_snackbar.dart';
+import '../../../core/utils/watermark.dart';
+import '../../../services/analytics_service.dart';
+import '../../../services/ad_service.dart';
+import '../../../models/user_model.dart';
 
-class UploadScreen extends ConsumerStatefulWidget {
-  final ImagePrompt prompt;
-  const UploadScreen({super.key, required this.prompt});
+class GenerationState {
+  final File? referenceImage;
+  final bool isGenerating;
+  final bool isDownloading;
+  final String? resultUrl;
+  final String? errorMessage;
+  final bool watermarkRemoved;
+  final bool hasClaimedShareReward;
+  final bool isUnlockingWatermark;
 
-  @override
-  ConsumerState<UploadScreen> createState() => _UploadScreenState();
+  const GenerationState({
+    this.referenceImage,
+    this.isGenerating = false,
+    this.isDownloading = false,
+    this.resultUrl,
+    this.errorMessage,
+    this.watermarkRemoved = false,
+    this.hasClaimedShareReward = false,
+    this.isUnlockingWatermark = false,
+  });
+
+  GenerationState copyWith({
+    File? referenceImage,
+    bool? isGenerating,
+    bool? isDownloading,
+    String? resultUrl,
+    String? errorMessage,
+    bool clearResult = false,
+    bool clearImage = false,
+    bool? watermarkRemoved,
+    bool? hasClaimedShareReward,
+    bool? isUnlockingWatermark,
+  }) {
+    return GenerationState(
+      referenceImage: clearImage ? null : (referenceImage ?? this.referenceImage),
+      isGenerating: isGenerating ?? this.isGenerating,
+      isDownloading: isDownloading ?? this.isDownloading,
+      resultUrl: clearResult ? null : (resultUrl ?? this.resultUrl),
+      errorMessage: errorMessage,
+      watermarkRemoved: clearResult ? false : (watermarkRemoved ?? this.watermarkRemoved),
+      hasClaimedShareReward: clearResult ? false : (hasClaimedShareReward ?? this.hasClaimedShareReward),
+      isUnlockingWatermark: isUnlockingWatermark ?? this.isUnlockingWatermark,
+    );
+  }
 }
 
-class _UploadScreenState extends ConsumerState<UploadScreen> {
-  File? _image;
-  bool _isGenerating = false;
-  String? _resultUrl;
+class GenerationNotifier extends StateNotifier<GenerationState> {
+  final Ref _ref;
+  GenerationNotifier(this._ref) : super(const GenerationState());
 
-  Future<void> _pickImage(ImageSource source) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: source);
-    if (pickedFile != null) {
-      setState(() => _image = File(pickedFile.path));
-    }
+  void setImage(File image) {
+    state = state.copyWith(referenceImage: image, errorMessage: null);
   }
 
-  Future<void> _generate() async {
-    if (_image == null) return;
-    setState(() => _isGenerating = true);
-    
-    final user = ref.read(userProvider).value;
+  void resetResult() {
+    state = state.copyWith(clearResult: true, errorMessage: null);
+  }
+
+  Future<void> generate(ImagePrompt prompt) async {
+    final image = state.referenceImage;
+    if (image == null) return;
+
+    state = state.copyWith(isGenerating: true, errorMessage: null);
+
+    final user = _ref.read(userProvider).value;
     if (user == null) {
-      setState(() => _isGenerating = false);
+      state = state.copyWith(isGenerating: false, errorMessage: "User session expired");
       return;
     }
 
-    final apiKey = await ref.read(firebaseServiceProvider).getGenerationApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      setState(() => _isGenerating = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Service temporarily unavailable.")),
-        );
-      }
+    final config = _ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+    if (user.coins < config.generationCost) {
+      state = state.copyWith(
+        isGenerating: false,
+        errorMessage: "Insufficient coins. You need at least ${config.generationCost} coins.",
+      );
       return;
     }
 
-    final success = await ref.read(userProvider.notifier).spendCoins(40);
-    if (!success) {
-      setState(() => _isGenerating = false);
-      return;
-    }
-
-    final apiService = ApiService(apiKey);
     try {
-      final result = await apiService.generateImage(
-        prompt: widget.prompt.hiddenPrompt,
-        referenceImage: _image!,
+      final finalPrompt = prompt.hiddenPrompt.trim().isEmpty 
+          ? prompt.category 
+          : prompt.hiddenPrompt;
+
+      AnalyticsService().logGenerationStarted(category: prompt.category);
+
+      final result = await _ref.read(firebaseServiceProvider).generateImageSecurely(
+        prompt: finalPrompt,
+        referenceImage: image,
       );
 
-      if (result != null) {
+      if (result != null && result.isNotEmpty) {
         final historyItem = HistoryItem(
           id: "", 
           outputUrl: result,
-          promptCategory: widget.prompt.category,
+          promptCategory: prompt.category,
           timestamp: DateTime.now(),
           status: HistoryStatus.success,
         );
-        await ref.read(firebaseServiceProvider).saveToHistory(user.uid, historyItem);
-      } else {
-        await ref.read(userProvider.notifier).addCoins(40);
-      }
+        await _ref.read(firebaseServiceProvider).saveToHistory(user.uid, historyItem);
 
-      setState(() {
-        _isGenerating = false;
-        _resultUrl = result;
-      });
+        AnalyticsService().logGenerationSuccess(category: prompt.category);
+
+        state = state.copyWith(
+          isGenerating: false,
+          resultUrl: result,
+          watermarkRemoved: user.tier == UserTier.paid,
+          hasClaimedShareReward: false,
+        );
+      } else {
+        AnalyticsService().logGenerationFailed(category: prompt.category, error: "Empty or null URL");
+        state = state.copyWith(
+          isGenerating: false,
+          errorMessage: "Generation failed. Please try again.",
+        );
+      }
     } catch (e) {
-      await ref.read(userProvider.notifier).addCoins(40);
-      setState(() => _isGenerating = false);
+      AnalyticsService().logGenerationFailed(category: prompt.category, error: e.toString());
+      state = state.copyWith(
+        isGenerating: false,
+        errorMessage: "Generation error: $e",
+      );
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_resultUrl != null) {
-      return _buildResultView();
+  /// Returns the bonus coins earned from this share (0 if already claimed
+  /// for this generation), so the caller can show it in a snackbar.
+  Future<int> downloadAndShareImage() async {
+    final url = state.resultUrl;
+    if (url == null || url.isEmpty) return 0;
+
+    state = state.copyWith(isDownloading: true);
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        // A free-tier result stays watermarked in the actual shared/downloaded
+        // file too — only the preview would be trivial to bypass otherwise.
+        final bytes = state.watermarkRemoved ? response.bodyBytes : await applyWatermark(response.bodyBytes);
+        final extension = state.watermarkRemoved ? 'jpg' : 'png';
+
+        final tempDir = await getTemporaryDirectory();
+        final filePath = '${tempDir.path}/ZunoAI_${DateTime.now().millisecondsSinceEpoch}.$extension';
+        final file = File(filePath);
+        await file.writeAsBytes(bytes);
+        await Share.shareXFiles([XFile(filePath)], text: "Created with Zuno AI!");
+        state = state.copyWith(isDownloading: false);
+
+        if (!state.hasClaimedShareReward) {
+          final config = _ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+          await _ref.read(userProvider.notifier).addCoins(config.shareUnlockReward);
+          state = state.copyWith(hasClaimedShareReward: true);
+          return config.shareUnlockReward;
+        }
+        return 0;
+      } else {
+        state = state.copyWith(
+          isDownloading: false,
+          errorMessage: "Download failed (${response.statusCode})",
+        );
+        return 0;
+      }
+    } catch (e) {
+      state = state.copyWith(
+        isDownloading: false,
+        errorMessage: "Download error: $e",
+      );
+      return 0;
     }
+  }
+
+  Future<bool> unlockWatermark(int cost) async {
+    if (state.watermarkRemoved) return true;
+    state = state.copyWith(isUnlockingWatermark: true);
+    final spent = await _ref.read(userProvider.notifier).spendCoins(cost);
+    state = state.copyWith(isUnlockingWatermark: false, watermarkRemoved: spent ? true : state.watermarkRemoved);
+    return spent;
+  }
+}
+
+final generationNotifierProvider =
+    StateNotifierProvider.autoDispose<GenerationNotifier, GenerationState>(
+  (ref) => GenerationNotifier(ref),
+);
+
+class UploadScreen extends ConsumerWidget {
+  final ImagePrompt prompt;
+  const UploadScreen({super.key, required this.prompt});
+
+  Future<void> _pickImage(BuildContext context, WidgetRef ref, ImageSource source) async {
+    final picker = ImagePicker();
+    // Downscale before upload — an uncompressed camera photo can be 4000px+
+    // and several MB, which slows the round trip to the AI backend for no
+    // quality benefit (the model doesn't use more detail than this anyway).
+    final pickedFile = await picker.pickImage(
+      source: source,
+      maxWidth: 1280,
+      maxHeight: 1280,
+      imageQuality: 80,
+    );
+    if (pickedFile != null) {
+      ref.read(generationNotifierProvider.notifier).setImage(File(pickedFile.path));
+    }
+  }
+
+  void _showPicker(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: AppColors.electricLime),
+              title: const Text('Gallery'),
+              onTap: () {
+                _pickImage(context, ref, ImageSource.gallery);
+                Navigator.of(context).pop();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera, color: AppColors.electricLime),
+              title: const Text('Camera'),
+              onTap: () {
+                _pickImage(context, ref, ImageSource.camera);
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final genState = ref.watch(generationNotifierProvider);
+
+    ref.listen<GenerationState>(generationNotifierProvider, (previous, next) {
+      if (next.errorMessage != null && next.errorMessage != previous?.errorMessage) {
+        AppSnackBar.showError(context, next.errorMessage!);
+      }
+    });
+
+    final resultUrl = genState.resultUrl;
+    if (resultUrl != null && resultUrl.isNotEmpty) {
+      return _ResultView(prompt: prompt, resultUrl: resultUrl);
+    }
+
+    final image = genState.referenceImage;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -109,7 +288,7 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildPromptCard(),
+            _PromptCard(prompt: prompt),
             const SizedBox(height: 32),
             const Text(
               "Add Reference Image",
@@ -117,7 +296,7 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
             ),
             const SizedBox(height: 12),
             GestureDetector(
-              onTap: () => _showPicker(context),
+              onTap: () => _showPicker(context, ref),
               child: Container(
                 width: double.infinity,
                 height: 300,
@@ -126,38 +305,39 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(color: Colors.white10),
                 ),
-                child: _image == null
+                child: image == null
                     ? Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          FaIcon(FontAwesomeIcons.cloudArrowUp, size: 48, color: AppColors.electricLime.withOpacity(0.5)),
+                          FaIcon(
+                            FontAwesomeIcons.cloudArrowUp,
+                            size: 48,
+                            color: AppColors.electricLime.withValues(alpha: 0.5),
+                          ),
                           const SizedBox(height: 16),
-                          const Text("Tap to upload your photo", style: TextStyle(color: Colors.white38, fontWeight: FontWeight.bold)),
+                          const Text(
+                            "Tap to upload your photo",
+                            style: TextStyle(color: Colors.white38, fontWeight: FontWeight.bold),
+                          ),
                         ],
                       )
                     : ClipRRect(
                         borderRadius: BorderRadius.circular(24),
-                        child: Image.file(_image!, fit: BoxFit.cover),
+                        child: Image.file(image, fit: BoxFit.cover),
                       ),
               ),
             ),
             const SizedBox(height: 40),
-            if (_isGenerating)
-              const Center(
-                child: Column(
-                  children: [
-                    CircularProgressIndicator(color: AppColors.electricLime),
-                    SizedBox(height: 16),
-                    Text("Zuno is visualizing...", style: TextStyle(color: AppColors.electricLime, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              )
+            if (genState.isGenerating)
+              const _AiProgressIndicator()
             else
               SizedBox(
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: _image == null ? null : _generate,
+                  onPressed: image == null
+                      ? null
+                      : () => ref.read(generationNotifierProvider.notifier).generate(prompt),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.electricLime,
                     foregroundColor: Colors.black,
@@ -171,8 +351,152 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
       ),
     );
   }
+}
 
-  Widget _buildPromptCard() {
+class _AiProgressIndicator extends StatefulWidget {
+  const _AiProgressIndicator();
+
+  @override
+  State<_AiProgressIndicator> createState() => _AiProgressIndicatorState();
+}
+
+class _AiProgressIndicatorState extends State<_AiProgressIndicator> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  int _currentTipIndex = 0;
+  Timer? _tipTimer;
+
+  static const List<String> _tips = [
+    "Tip: You get 40 free coins every single day!",
+    "Tip: Clear reference photos produce higher-quality AI portraits.",
+    "Tip: Explore saved prompt blueprints to discover new styles.",
+    "Tip: Upgrade to Zuno Premium for priority processing speed.",
+  ];
+
+  static const List<Map<String, dynamic>> _phases = [
+    {"threshold": 0.25, "label": "Analyzing prompt & reference styles..."},
+    {"threshold": 0.60, "label": "Running neural diffusion pipeline..."},
+    {"threshold": 0.90, "label": "Enhancing details & lighting..."},
+    {"threshold": 1.00, "label": "Finalizing generation..."},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 12),
+    )..forward();
+
+    _tipTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (mounted) {
+        setState(() {
+          _currentTipIndex = (_currentTipIndex + 1) % _tips.length;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _tipTimer?.cancel();
+    super.dispose();
+  }
+
+  String _getCurrentPhaseLabel(double progress) {
+    for (final phase in _phases) {
+      if (progress <= (phase["threshold"] as double)) {
+        return phase["label"] as String;
+      }
+    }
+    return "Finalizing generation...";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final progress = _controller.value;
+        final phaseLabel = _getCurrentPhaseLabel(progress);
+
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.electricLime.withValues(alpha: 0.3)),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.electricLime.withValues(alpha: 0.1),
+                blurRadius: 20,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      phaseLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    "${(progress * 100).toInt()}%",
+                    style: const TextStyle(
+                      color: AppColors.electricLime,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 8,
+                  backgroundColor: Colors.white10,
+                  color: AppColors.electricLime,
+                ),
+              ),
+              const SizedBox(height: 20),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 500),
+                child: Text(
+                  _tips[_currentTipIndex],
+                  key: ValueKey<int>(_currentTipIndex),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PromptCard extends StatelessWidget {
+  final ImagePrompt prompt;
+  const _PromptCard({required this.prompt});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -188,16 +512,16 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
               const Icon(Icons.auto_awesome, color: AppColors.electricLime, size: 20),
               const SizedBox(width: 8),
               Text(
-                "Prompt: ${widget.prompt.category}",
+                "Prompt: ${prompt.category}",
                 style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ],
           ),
           const SizedBox(height: 12),
           Text(
-            widget.prompt.hiddenPrompt.isEmpty 
+            prompt.hiddenPrompt.isEmpty
                 ? "Experience the magic of AI based on this theme."
-                : widget.prompt.hiddenPrompt,
+                : prompt.hiddenPrompt,
             style: const TextStyle(color: Colors.white70, height: 1.5),
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
@@ -206,8 +530,32 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
       ),
     );
   }
+}
 
-  Widget _buildResultView() {
+class _ResultView extends ConsumerWidget {
+  final ImagePrompt prompt;
+  final String resultUrl;
+
+  const _ResultView({required this.prompt, required this.resultUrl});
+
+  // Free users see an interstitial when they're done looking at a result —
+  // the highest-engagement moment in the app, and the standard placement for
+  // this category of app. Premium stays completely ad-free.
+  void _leaveResult(WidgetRef ref) {
+    final isPremium = ref.read(userProvider).value?.tier == UserTier.paid;
+    final notifier = ref.read(generationNotifierProvider.notifier);
+    if (isPremium) {
+      notifier.resetResult();
+      return;
+    }
+    AdService().showInterstitial(() => notifier.resetResult());
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final genState = ref.watch(generationNotifierProvider);
+    final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -215,14 +563,8 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
         title: const Text("Result Image", style: TextStyle(fontWeight: FontWeight.w900)),
         leading: IconButton(
           icon: const FaIcon(FontAwesomeIcons.chevronLeft, size: 20),
-          onPressed: () => setState(() => _resultUrl = null),
+          onPressed: () => _leaveResult(ref),
         ),
-        actions: [
-          IconButton(
-            icon: const FaIcon(FontAwesomeIcons.ellipsisVertical, size: 20),
-            onPressed: () {},
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -231,35 +573,88 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(32),
-                child: CachedNetworkImage(
-                  imageUrl: _resultUrl!,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(color: AppColors.surface),
+                child: RepaintBoundary(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CachedNetworkImage(
+                        imageUrl: resultUrl,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(color: AppColors.surface),
+                      ),
+                      if (!genState.watermarkRemoved)
+                        IgnorePointer(
+                          child: Center(
+                            child: Transform.rotate(
+                              angle: -0.4,
+                              child: const Text(
+                                "ZUNO AI",
+                                style: TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
+          if (!genState.watermarkRemoved)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: genState.isUnlockingWatermark
+                      ? null
+                      : () async {
+                          final unlocked = await ref
+                              .read(generationNotifierProvider.notifier)
+                              .unlockWatermark(config.watermarkRemovalCost);
+                          if (context.mounted) {
+                            if (unlocked) {
+                              AppSnackBar.showSuccess(context, "Watermark removed!");
+                            } else {
+                              AppSnackBar.showError(context, "Not enough coins.");
+                            }
+                          }
+                        },
+                  icon: genState.isUnlockingWatermark
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const FaIcon(FontAwesomeIcons.eraser, size: 14),
+                  label: Text("Remove Watermark (${config.watermarkRemovalCost} coins)"),
+                ),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.all(24.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Landscape imaginary tree in another realm with night sky view", // Mock text from screenshot
+                  prompt.hiddenPrompt.isNotEmpty ? prompt.hiddenPrompt : prompt.category,
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 24),
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () => setState(() => _resultUrl = null),
+                        onPressed: () => _leaveResult(ref),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           side: const BorderSide(color: Colors.white10),
                           shape: const StadiumBorder(),
-                          backgroundColor: Colors.white.withOpacity(0.05),
+                          backgroundColor: Colors.white.withValues(alpha: 0.05),
                         ),
                         child: const Text("Re-generate", style: TextStyle(color: Colors.white)),
                       ),
@@ -267,16 +662,31 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
                     const SizedBox(width: 16),
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: () {},
-                        icon: const FaIcon(FontAwesomeIcons.download, size: 16),
-                        label: const Text("Download"),
+                        onPressed: genState.isDownloading
+                            ? null
+                            : () async {
+                                final bonus = await ref
+                                    .read(generationNotifierProvider.notifier)
+                                    .downloadAndShareImage();
+                                if (bonus > 0 && context.mounted) {
+                                  AppSnackBar.showSuccess(context, "Thanks for sharing! +$bonus coins");
+                                }
+                              },
+                        icon: genState.isDownloading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                              )
+                            : const FaIcon(FontAwesomeIcons.download, size: 16),
+                        label: Text(genState.isDownloading ? "Downloading..." : "Download"),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.electricLime,
                           foregroundColor: Colors.black,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: const StadiumBorder(),
                           elevation: 8,
-                          shadowColor: AppColors.electricLime.withOpacity(0.5),
+                          shadowColor: AppColors.electricLime.withValues(alpha: 0.5),
                         ),
                       ),
                     ),
@@ -286,36 +696,6 @@ class _UploadScreenState extends ConsumerState<UploadScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  void _showPicker(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
-      builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: AppColors.electricLime),
-              title: const Text('Gallery'),
-              onTap: () {
-                _pickImage(ImageSource.gallery);
-                Navigator.of(context).pop();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_camera, color: AppColors.electricLime),
-              title: const Text('Camera'),
-              onTap: () {
-                _pickImage(ImageSource.camera);
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
-        ),
       ),
     );
   }

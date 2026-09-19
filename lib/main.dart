@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'core/theme/app_theme.dart';
-import 'features/dashboard/presentation/dashboard_screen.dart';
-import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/blocked_screen.dart';
 import 'providers/user_provider.dart';
 import 'services/ad_service.dart';
@@ -11,8 +9,6 @@ import 'services/notification_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'features/root_screen.dart';
-
-import 'features/auth/presentation/onboarding_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -77,7 +73,8 @@ class AuthWrapper extends ConsumerWidget {
             error: (err, _) => Scaffold(body: Center(child: Text("Data Error: $err"))),
           );
         } else {
-          return const OnboardingScreen();
+          // Deferred Authentication: Allow guest users to explore Dashboard directly
+          return const RootScreen();
         }
       },
       loading: () => const Scaffold(

@@ -1,0 +1,11 @@
+project_id = "ylenfbneddyuzrkckaul"
+
+# Both functions verify the caller's Firebase ID token themselves (see
+# verifyFirebaseIdToken in each function) — Supabase's own gateway-level JWT
+# check must be disabled, otherwise it rejects the Firebase token before the
+# function code ever runs (UNAUTHORIZED_ASYMMETRIC_JWT / "Invalid JWT").
+[functions.generate-image]
+verify_jwt = false
+
+[functions.confirm-purchase]
+verify_jwt = false

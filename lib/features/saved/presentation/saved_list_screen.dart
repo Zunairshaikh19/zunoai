@@ -7,6 +7,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../models/image_prompt.dart';
 import '../../../providers/saved_prompts_provider.dart';
 import '../../../providers/root_index_provider.dart';
+import '../../../core/utils/app_snackbar.dart';
 import '../../detail/presentation/detail_screen.dart';
 
 class SavedListScreen extends ConsumerWidget {
@@ -110,7 +111,7 @@ class _SavedImageCard extends ConsumerWidget {
                   height: height,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(color: Colors.white.withOpacity(0.05)),
+                  placeholder: (context, url) => Container(color: Colors.white.withValues(alpha: 0.05)),
                 ),
                 Positioned(
                   top: 12,
@@ -118,14 +119,7 @@ class _SavedImageCard extends ConsumerWidget {
                   child: GestureDetector(
                     onTap: () {
                       ref.read(savedPromptsProvider.notifier).toggleSave(prompt);
-                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Removed from Saved List", style: TextStyle(fontWeight: FontWeight.bold)),
-                          duration: Duration(seconds: 1),
-                          backgroundColor: Colors.grey,
-                        ),
-                      );
+                      AppSnackBar.showInfo(context, "Removed from Saved List");
                     },
                     child: Container(
                       padding: const EdgeInsets.all(8),

@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_model.dart';
+import '../models/economy_config.dart';
 import '../services/firebase_service.dart';
 import '../services/notification_service.dart';
+import 'economy_provider.dart';
 
 final firebaseServiceProvider = Provider((ref) => FirebaseService());
 final notificationServiceProvider = Provider((ref) => NotificationService());
@@ -52,14 +55,29 @@ class UserNotifier extends StateNotifier<AsyncValue<UserModel?>> {
       if (userData != null) {
         state = AsyncValue.data(userData);
         _checkDailyReset(userData);
+        if (userData.referralCode.isEmpty) {
+          // Backfill for accounts created before referral codes existed, or
+          // any profile write that otherwise landed without one — the
+          // Refer & Earn card has nothing to show without this.
+          try {
+            await _firebaseService.backfillReferralCode(uid);
+          } catch (e) {
+            debugPrint("Error backfilling referral code: $e");
+          }
+        }
       } else {
         // Handle case where user is in Auth but no profile exists
         final authUser = _ref.read(authStateProvider).value;
         if (authUser != null) {
           try {
-            await _firebaseService.createUserProfile(authUser);
+            final config = _ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+            await _firebaseService.createUserProfile(
+              authUser,
+              signupBonus: config.signupBonus,
+              referralReward: config.referralReward,
+            );
           } catch (e) {
-            print("Error creating user profile: $e");
+            debugPrint("Error creating user profile: $e");
           }
         }
       }
@@ -78,11 +96,20 @@ class UserNotifier extends StateNotifier<AsyncValue<UserModel?>> {
   }
 
   Future<void> _checkDailyReset(UserModel user) async {
+    if (user.tier == UserTier.paid &&
+        user.premiumExpiresAt != null &&
+        user.premiumExpiresAt!.isBefore(DateTime.now())) {
+      // Let a lapsed subscription expire client-side; security rules only
+      // allow this exact paid -> free transition for the user's own account.
+      await _firebaseService.expirePremium(user.uid);
+    }
+
     final now = DateTime.now();
     final lastReset = user.lastDailyReset;
-    
+
     if (now.day != lastReset.day || now.month != lastReset.month || now.year != lastReset.year) {
-      final resetCoins = user.tier == UserTier.paid ? 80 : 40;
+      final config = _ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+      final resetCoins = user.tier == UserTier.paid ? config.dailyBonusPremium : config.dailyBonusFree;
       await _firebaseService.resetDailyLimits(user.uid, resetCoins);
       final updatedData = await _firebaseService.getUserData(user.uid);
       state = AsyncValue.data(updatedData);

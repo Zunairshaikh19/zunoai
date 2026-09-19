@@ -12,35 +12,35 @@ import '../../detail/presentation/detail_screen.dart';
 import '../../monetization/presentation/coin_store_screen.dart';
 import '../../generation/presentation/history_screen.dart';
 import '../../../providers/saved_prompts_provider.dart';
-
 import '../../../services/local_cache_service.dart';
+import '../../../core/utils/app_snackbar.dart';
+import '../../../models/user_model.dart';
+import 'daily_streak_banner.dart';
+import 'native_ad_card.dart';
 
 final localCacheServiceProvider = Provider((ref) => LocalCacheService());
+final selectedCategoryProvider = StateProvider<String>((ref) => "All");
 
 class PromptsNotifier extends AsyncNotifier<List<ImagePrompt>> {
   @override
   FutureOr<List<ImagePrompt>> build() async {
-    // 1. Load from cache first
     final cached = await ref.read(localCacheServiceProvider).getCachedPrompts();
     if (cached.isNotEmpty) {
-      // Return cached data immediately, then trigger background update
       _fetchFromNetwork();
       return cached;
     }
-    
-    // 2. If no cache, wait for network
     return _fetchFromNetwork();
   }
 
   Future<List<ImagePrompt>> _fetchFromNetwork() async {
     try {
       final prompts = await ref.read(firebaseServiceProvider).getImagePrompts();
-      // 3. Save to cache
       await ref.read(localCacheServiceProvider).savePrompts(prompts);
       state = AsyncValue.data(prompts);
       return prompts;
     } catch (e, stack) {
       if (state.hasValue) return state.value!;
+      state = AsyncValue.error(e, stack);
       rethrow;
     }
   }
@@ -53,62 +53,71 @@ class PromptsNotifier extends AsyncNotifier<List<ImagePrompt>> {
 
 final promptsProvider = AsyncNotifierProvider<PromptsNotifier, List<ImagePrompt>>(PromptsNotifier.new);
 
+final filteredPromptsProvider = Provider<AsyncValue<List<ImagePrompt>>>((ref) {
+  final promptsAsync = ref.watch(promptsProvider);
+  final category = ref.watch(selectedCategoryProvider);
 
-class DashboardScreen extends ConsumerStatefulWidget {
+  return promptsAsync.whenData((prompts) {
+    if (category == "All") return prompts;
+    return prompts.where((p) => p.category == category).toList();
+  });
+});
+
+class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
   @override
-  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
-}
-
-class _DashboardScreenState extends ConsumerState<DashboardScreen> {
-  String selectedCategory = "All";
-
-  @override
-  Widget build(BuildContext context) {
-    final userAsync = ref.watch(userProvider);
-    final promptsAsync = ref.watch(promptsProvider);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final filteredPromptsAsync = ref.watch(filteredPromptsProvider);
+    final allPrompts = ref.watch(promptsProvider).value ?? [];
+    final isPremium = ref.watch(userProvider).value?.tier == UserTier.paid;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(userAsync),
+            const _DashboardHeader(),
+            const DailyStreakBanner(),
             Expanded(
-              child: promptsAsync.when(
-                data: (prompts) {
-                  final filtered = selectedCategory == "All" 
-                      ? prompts 
-                      : prompts.where((p) => p.category == selectedCategory).toList();
-                  
-                  return RefreshIndicator(
-                    onRefresh: () => ref.read(promptsProvider.notifier).refresh(),
-                    color: AppColors.electricLime,
-                    backgroundColor: Colors.black,
-                    child: CustomScrollView(
-                      slivers: [
-                        SliverToBoxAdapter(child: _buildCategoryFilter(prompts)),
-                        SliverPadding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          sliver: SliverMasonryGrid.count(
-                            crossAxisCount: 2,
-                            mainAxisSpacing: 12,
-                            crossAxisSpacing: 12,
-                            itemBuilder: (context, index) => _ImageCard(
-                              prompt: filtered[index],
-                              index: index,
-                            ),
-                            childCount: filtered.length,
-                          ),
+              child: filteredPromptsAsync.when(
+                data: (filtered) => RefreshIndicator(
+                  onRefresh: () => ref.read(promptsProvider.notifier).refresh(),
+                  color: AppColors.electricLime,
+                  backgroundColor: Colors.black,
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: _CategoryFilterList(allPrompts: allPrompts),
+                      ),
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        sliver: SliverMasonryGrid.count(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          itemBuilder: (context, index) {
+                            if (!isPremium && isNativeAdSlot(index)) {
+                              return const RepaintBoundary(child: NativeAdCard());
+                            }
+                            final promptIndex = isPremium ? index : promptIndexForRenderedIndex(index);
+                            return RepaintBoundary(
+                              child: _ImageCard(
+                                prompt: filtered[promptIndex],
+                                index: promptIndex,
+                              ),
+                            );
+                          },
+                          childCount: isPremium ? filtered.length : totalSlotsWithAds(filtered.length),
                         ),
-                        const SliverToBoxAdapter(child: SizedBox(height: 100)), // Space for floating bar
-                      ],
-                    ),
-                  );
-                },
-                loading: () => _buildShimmerGrid(),
-                error: (err, _) => _buildErrorMessage(err),
+                      ),
+                      const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                    ],
+                  ),
+                ),
+                loading: () => const _ShimmerGrid(),
+                error: (err, _) => _ErrorMessage(error: err),
               ),
             ),
           ],
@@ -116,8 +125,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
     );
   }
+}
 
-  Widget _buildHeader(AsyncValue<dynamic> userAsync) {
+class _DashboardHeader extends ConsumerWidget {
+  const _DashboardHeader();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final userAsync = ref.watch(userProvider);
+
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Row(
@@ -150,7 +166,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: Colors.white.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: Colors.white10),
                 ),
@@ -167,7 +183,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             ),
             loading: () => const SizedBox(),
-            error: (_, __) => const SizedBox(),
+            error: (err, stack) => const SizedBox(),
           ),
           const SizedBox(width: 8),
           GestureDetector(
@@ -178,7 +194,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: Colors.white.withValues(alpha: 0.05),
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white10),
               ),
@@ -189,10 +205,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
     );
   }
+}
 
-  Widget _buildCategoryFilter(List<ImagePrompt> prompts) {
-    final categories = ["All", ...prompts.map((p) => p.category).toSet().toList()];
-    
+class _CategoryFilterList extends ConsumerWidget {
+  final List<ImagePrompt> allPrompts;
+  const _CategoryFilterList({required this.allPrompts});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final categories = ["All", ...allPrompts.map((p) => p.category).toSet()];
+    final selectedCategory = ref.watch(selectedCategoryProvider);
+
     return SizedBox(
       height: 50,
       child: ListView.builder(
@@ -207,7 +230,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             child: ChoiceChip(
               label: Text(cat),
               selected: isSelected,
-              onSelected: (val) => setState(() => selectedCategory = cat),
+              onSelected: (_) => ref.read(selectedCategoryProvider.notifier).state = cat,
               backgroundColor: Colors.transparent,
               selectedColor: Colors.white10,
               labelStyle: TextStyle(
@@ -224,41 +247,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
     );
   }
-
-  Widget _buildShimmerGrid() {
-    return MasonryGridView.count(
-      padding: const EdgeInsets.all(16),
-      crossAxisCount: 2,
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
-      itemBuilder: (context, index) => Shimmer.fromColors(
-        baseColor: Colors.grey[900]!,
-        highlightColor: Colors.grey[800]!,
-        child: Container(
-          height: (index % 3 + 2) * 80.0,
-          decoration: BoxDecoration(
-            color: Colors.black,
-            borderRadius: BorderRadius.circular(20),
-          ),
-        ),
-      ),
-      itemCount: 6,
-    );
-  }
-
-  Widget _buildErrorMessage(Object error) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.cloud_off, size: 64, color: Colors.white24),
-          const SizedBox(height: 16),
-          const Text("Could not fetch creations", style: TextStyle(color: Colors.white54)),
-          TextButton(onPressed: () => ref.refresh(promptsProvider), child: const Text("Retry")),
-        ],
-      ),
-    );
-  }
 }
 
 class _ImageCard extends ConsumerWidget {
@@ -268,7 +256,6 @@ class _ImageCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Variable heights for masonry effect
     final height = (index % 3 + 2.5) * 60.0;
     final savedPrompts = ref.watch(savedPromptsProvider);
     final isSaved = savedPrompts.any((p) => p.id == prompt.id);
@@ -290,7 +277,7 @@ class _ImageCard extends ConsumerWidget {
                   height: height,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(color: Colors.white.withOpacity(0.05)),
+                  placeholder: (context, url) => Container(color: Colors.white.withValues(alpha: 0.05)),
                 ),
                 Positioned(
                   top: 12,
@@ -298,22 +285,16 @@ class _ImageCard extends ConsumerWidget {
                   child: GestureDetector(
                     onTap: () {
                       ref.read(savedPromptsProvider.notifier).toggleSave(prompt);
-                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            isSaved ? "Removed from Saved List" : "Added to Saved List",
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          duration: const Duration(seconds: 1),
-                          backgroundColor: isSaved ? Colors.grey[800] : AppColors.electricLime,
-                        ),
-                      );
+                      if (isSaved) {
+                        AppSnackBar.showInfo(context, "Removed from Saved List");
+                      } else {
+                        AppSnackBar.showSuccess(context, "Added to Saved List");
+                      }
                     },
                     child: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: isSaved ? AppColors.electricLime : Colors.black.withOpacity(0.4),
+                        color: isSaved ? AppColors.electricLime : Colors.black.withValues(alpha: 0.4),
                         shape: BoxShape.circle,
                       ),
                       child: FaIcon(
@@ -327,26 +308,75 @@ class _ImageCard extends ConsumerWidget {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(8, 8, 8, 0),
             child: Row(
               children: [
-                const CircleAvatar(
+                CircleAvatar(
                   radius: 10,
                   backgroundColor: AppColors.electricLime,
                   child: FaIcon(FontAwesomeIcons.solidUser, size: 10, color: Colors.black),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     "Zuno Artist",
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Colors.white60),
+                    style: TextStyle(fontSize: 12, color: Colors.white60),
                   ),
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ShimmerGrid extends StatelessWidget {
+  const _ShimmerGrid();
+
+  @override
+  Widget build(BuildContext context) {
+    return MasonryGridView.count(
+      padding: const EdgeInsets.all(16),
+      crossAxisCount: 2,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      itemBuilder: (context, index) => Shimmer.fromColors(
+        baseColor: Colors.grey[900]!,
+        highlightColor: Colors.grey[800]!,
+        child: Container(
+          height: (index % 3 + 2) * 80.0,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+      ),
+      itemCount: 6,
+    );
+  }
+}
+
+class _ErrorMessage extends ConsumerWidget {
+  final Object error;
+  const _ErrorMessage({required this.error});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.cloud_off, size: 64, color: Colors.white24),
+          const SizedBox(height: 16),
+          const Text("Could not fetch creations", style: TextStyle(color: Colors.white54)),
+          TextButton(
+            onPressed: () => ref.refresh(promptsProvider),
+            child: const Text("Retry"),
           ),
         ],
       ),

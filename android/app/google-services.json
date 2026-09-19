@@ -12,7 +12,12 @@
           "package_name": "com.example.zunoai"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "31792471355-1ftg0vibel7bf6c86v896509og3mgqr8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyApZ8D-OQ74jLd5naZQnYp5daBfpD_eBjc"
@@ -20,7 +25,41 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "31792471355-1ftg0vibel7bf6c86v896509og3mgqr8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:31792471355:android:a2b43b86d456492f576b1e",
+        "android_client_info": {
+          "package_name": "com.zunoai.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "31792471355-1ftg0vibel7bf6c86v896509og3mgqr8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApZ8D-OQ74jLd5naZQnYp5daBfpD_eBjc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "31792471355-1ftg0vibel7bf6c86v896509og3mgqr8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

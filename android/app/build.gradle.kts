@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.zunoai"
+    namespace = "com.zunoai.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,7 +16,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.zunoai"
+        applicationId = "com.zunoai.app"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

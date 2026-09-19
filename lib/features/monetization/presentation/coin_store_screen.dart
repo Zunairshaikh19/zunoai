@@ -3,8 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../providers/user_provider.dart';
+import '../../../providers/economy_provider.dart';
 import '../../../services/ad_service.dart';
 import '../../../models/user_model.dart';
+import '../../../models/economy_config.dart';
+import '../../../core/utils/app_snackbar.dart';
+import '../../../services/analytics_service.dart';
 import 'paywall_screen.dart';
 
 class CoinStoreScreen extends ConsumerWidget {
@@ -13,6 +17,7 @@ class CoinStoreScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final userAsync = ref.watch(userProvider);
+    final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
 
     return Scaffold(
       appBar: AppBar(
@@ -23,7 +28,7 @@ class CoinStoreScreen extends ConsumerWidget {
         data: (user) {
           if (user == null) return const Center(child: Text("Please log in"));
           
-          final adLimit = user.tier == UserTier.paid ? 6 : 3;
+          final adLimit = user.tier == UserTier.paid ? config.premiumAdLimitPerDay : config.freeAdLimitPerDay;
           final canWatchAd = user.dailyAdsWatched < adLimit;
 
           return SingleChildScrollView(
@@ -33,11 +38,11 @@ class CoinStoreScreen extends ConsumerWidget {
                 // Current Balance Card
                 _buildBalanceCard(user.coins),
                 const SizedBox(height: 32),
-                
+
                 // Earn Section
                 _buildSectionTitle("Earn Free Coins"),
                 const SizedBox(height: 16),
-                _buildAdCard(context, ref, user.dailyAdsWatched, adLimit, canWatchAd),
+                _buildAdCard(context, ref, user.dailyAdsWatched, adLimit, canWatchAd, config.adRewardAmount),
                 
                 const SizedBox(height: 40),
                 
@@ -93,7 +98,7 @@ class CoinStoreScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildAdCard(BuildContext context, WidgetRef ref, int watched, int limit, bool canWatch) {
+  Widget _buildAdCard(BuildContext context, WidgetRef ref, int watched, int limit, bool canWatch, int rewardAmount) {
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -107,7 +112,7 @@ class CoinStoreScreen extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.electricLime.withOpacity(0.1),
+                color: AppColors.electricLime.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const FaIcon(FontAwesomeIcons.circlePlay, size: 24, color: AppColors.electricLime),
@@ -118,13 +123,13 @@ class CoinStoreScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text("Watch & Earn", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
-                  Text("Get 40 coins ($watched/$limit today)", style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                  Text("Get $rewardAmount coins ($watched/$limit today)", style: const TextStyle(color: Colors.white38, fontSize: 12)),
                 ],
               ),
             ),
             ElevatedButton(
               onPressed: !canWatch ? null : () {
-                _showAd(context, ref);
+                _showAd(context, ref, rewardAmount);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.electricLime,
@@ -148,10 +153,10 @@ class CoinStoreScreen extends ConsumerWidget {
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(32),
-          border: Border.all(color: AppColors.electricLime.withOpacity(0.5), width: 2),
+          border: Border.all(color: AppColors.electricLime.withValues(alpha: 0.5), width: 2),
           boxShadow: [
             BoxShadow(
-              color: AppColors.electricLime.withOpacity(0.1),
+              color: AppColors.electricLime.withValues(alpha: 0.1),
               blurRadius: 20,
               spreadRadius: 2,
             ),
@@ -178,22 +183,23 @@ class CoinStoreScreen extends ConsumerWidget {
     );
   }
 
-  void _showAd(BuildContext context, WidgetRef ref) {
+  void _showAd(BuildContext context, WidgetRef ref, int rewardAmount) {
     AdService().showRewarded(
       onReward: (reward) {
-        // BUG FIX: Ensure we use the latest user context and force refresh
-        ref.read(userProvider.notifier).addCoins(40).then((_) {
+        ref.read(userProvider.notifier).addCoins(rewardAmount).then((_) {
           ref.read(userProvider.notifier).incrementAdCount();
         });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Coins added successfully!")),
-        );
+
+        AnalyticsService().logRewardedAdWatched();
+
+        if (context.mounted) {
+          AppSnackBar.showSuccess(context, "Coins added successfully!");
+        }
       },
       onFailed: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Ad failed to load. Please try again.")),
-        );
+        if (context.mounted) {
+          AppSnackBar.showError(context, "Ad failed to load. Please try again.");
+        }
       },
     );
   }

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../providers/user_provider.dart';
+import '../../../providers/economy_provider.dart';
+import '../../../models/economy_config.dart';
+import '../../../core/utils/app_snackbar.dart';
 
 import 'widgets/social_button.dart';
 
@@ -21,16 +24,19 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   Future<void> _signUp() async {
     setState(() => _isLoading = true);
     try {
+      final config = ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
       await ref.read(firebaseServiceProvider).signUp(
         _emailController.text.trim(),
         _passwordController.text.trim(),
         referralCode: _referralController.text.trim(),
+        signupBonus: config.signupBonus,
+        referralReward: config.referralReward,
       );
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Signup Failed: $e")),
-      );
+      if (mounted) {
+        AppSnackBar.showError(context, "Signup Failed: $e");
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -115,12 +121,16 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                 icon: Icons.g_mobiledata,
                 onPressed: () async {
                   try {
-                    await ref.read(firebaseServiceProvider).signInWithGoogle();
+                    final config = ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+                    await ref.read(firebaseServiceProvider).signInWithGoogle(
+                          signupBonus: config.signupBonus,
+                          referralReward: config.referralReward,
+                        );
                     if (mounted) Navigator.pop(context);
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("Google Sign-In failed: $e")),
-                    );
+                    if (context.mounted) {
+                      AppSnackBar.showError(context, "Google Sign-In failed: $e");
+                    }
                   }
                 },
               ),

@@ -4,8 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../models/user_model.dart';
+import '../../../models/economy_config.dart';
 import '../../../providers/user_provider.dart';
+import '../../../providers/economy_provider.dart';
 import '../../../services/ad_service.dart';
+import '../../../core/utils/app_snackbar.dart';
 import 'paywall_screen.dart';
 
 class CoinDialog extends ConsumerWidget {
@@ -14,7 +17,8 @@ class CoinDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(userProvider).value;
-    final adLimit = user?.tier == UserTier.paid ? 6 : 3;
+    final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+    final adLimit = user?.tier == UserTier.paid ? config.premiumAdLimitPerDay : config.freeAdLimitPerDay;
     final canWatchAd = user != null && user.dailyAdsWatched < adLimit;
 
     return Dialog(
@@ -51,37 +55,44 @@ class CoinDialog extends ConsumerWidget {
               const SizedBox(height: 12),
               
               // Subtitle
-              const Text(
-                "You need 40 Zuno coins to visualize this masterpiece.",
+              Text(
+                "You need ${config.generationCost} Zuno coins to visualize this masterpiece.",
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white60, fontSize: 15, height: 1.4),
+                style: const TextStyle(color: Colors.white60, fontSize: 15, height: 1.4),
               ),
               const SizedBox(height: 32),
 
               // Action Buttons
               _buildActionButton(
                 context: context,
-                label: "Earn 40 Coins Free",
-                subLabel: canWatchAd 
-                    ? "Get 40 coins (${user?.dailyAdsWatched ?? 0}/$adLimit daily)"
+                label: "Earn ${config.adRewardAmount} Coins Free",
+                subLabel: canWatchAd
+                    ? "Get ${config.adRewardAmount} coins (${user?.dailyAdsWatched ?? 0}/$adLimit daily)"
                     : "Limit reached ($adLimit/$adLimit)",
                 icon: FontAwesomeIcons.solidCirclePlay,
                 color: canWatchAd ? AppColors.electricLime : Colors.white24,
                 onPressed: !canWatchAd ? () {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Daily limit reached. Try Premium!")),
-                  );
+                  AppSnackBar.showInfo(context, "Daily limit reached. Try Premium!");
                 } : () {
-                  Navigator.pop(context);
+                  // Don't pop the dialog before the ad — its `ref` would be
+                  // disposed by the time the ad finishes (several seconds
+                  // later), silently dropping the reward. Grant the coins
+                  // first, then close.
+                  final notifier = ref.read(userProvider.notifier);
                   AdService().showRewarded(
                     onReward: (reward) {
-                      ref.read(userProvider.notifier).addCoins(40).then((_) {
-                        ref.read(userProvider.notifier).incrementAdCount();
+                      notifier.addCoins(config.adRewardAmount).then((_) {
+                        notifier.incrementAdCount();
                       });
                     },
-                    onFailed: () {},
+                    onFailed: () {
+                      if (context.mounted) {
+                        AppSnackBar.showError(context, "Ad failed to load. Please try again.");
+                      }
+                    },
                   );
+                  Navigator.pop(context);
                 },
               ),
               

@@ -7,6 +7,7 @@ class UserModel {
   final String email;
   final int coins;
   final UserTier tier;
+  final DateTime? premiumExpiresAt;
   final String referralCode;
   final String? referredBy;
   final DateTime lastDailyReset;
@@ -21,6 +22,9 @@ class UserModel {
   final DateTime? lastActivity;
   final String? fcmToken;
 
+  final int loginStreak;
+  final DateTime? lastStreakClaim;
+
   UserModel({
     required this.uid,
     required this.email,
@@ -28,6 +32,7 @@ class UserModel {
     this.photoUrl,
     this.coins = 40,
     this.tier = UserTier.free,
+    this.premiumExpiresAt,
     required this.referralCode,
     this.referredBy,
     required this.lastDailyReset,
@@ -36,6 +41,8 @@ class UserModel {
     this.isBlocked = false,
     this.lastActivity,
     this.fcmToken,
+    this.loginStreak = 0,
+    this.lastStreakClaim,
   });
 
   factory UserModel.fromMap(Map<String, dynamic> data, String uid) {
@@ -46,6 +53,7 @@ class UserModel {
       photoUrl: data['photoUrl'],
       coins: data['coins'] ?? 40,
       tier: data['tier'] == 'paid' ? UserTier.paid : UserTier.free,
+      premiumExpiresAt: (data['premiumExpiresAt'] as Timestamp?)?.toDate(),
       referralCode: data['referralCode'] ?? '',
       referredBy: data['referredBy'],
       lastDailyReset: (data['lastDailyReset'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -54,6 +62,8 @@ class UserModel {
       isBlocked: data['isBlocked'] ?? false,
       lastActivity: (data['lastActivity'] as Timestamp?)?.toDate(),
       fcmToken: data['fcmToken'],
+      loginStreak: data['loginStreak'] ?? 0,
+      lastStreakClaim: (data['lastStreakClaim'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -64,6 +74,7 @@ class UserModel {
       'photoUrl': photoUrl,
       'coins': coins,
       'tier': tier == UserTier.paid ? 'paid' : 'free',
+      'premiumExpiresAt': premiumExpiresAt != null ? Timestamp.fromDate(premiumExpiresAt!) : null,
       'referralCode': referralCode,
       'referredBy': referredBy,
       'lastDailyReset': Timestamp.fromDate(lastDailyReset),
@@ -72,6 +83,8 @@ class UserModel {
       'isBlocked': isBlocked,
       'lastActivity': lastActivity != null ? Timestamp.fromDate(lastActivity!) : FieldValue.serverTimestamp(),
       'fcmToken': fcmToken,
+      'loginStreak': loginStreak,
+      'lastStreakClaim': lastStreakClaim != null ? Timestamp.fromDate(lastStreakClaim!) : null,
     };
   }
 
@@ -80,12 +93,15 @@ class UserModel {
     String? photoUrl,
     int? coins,
     UserTier? tier,
+    DateTime? premiumExpiresAt,
     int? dailyAdsWatched,
     DateTime? lastDailyReset,
     int? referralCount,
     bool? isBlocked,
     DateTime? lastActivity,
     String? fcmToken,
+    int? loginStreak,
+    DateTime? lastStreakClaim,
   }) {
     return UserModel(
       uid: uid,
@@ -94,6 +110,7 @@ class UserModel {
       photoUrl: photoUrl ?? this.photoUrl,
       coins: coins ?? this.coins,
       tier: tier ?? this.tier,
+      premiumExpiresAt: premiumExpiresAt ?? this.premiumExpiresAt,
       referralCode: referralCode,
       referredBy: referredBy,
       lastDailyReset: lastDailyReset ?? this.lastDailyReset,
@@ -102,6 +119,8 @@ class UserModel {
       isBlocked: isBlocked ?? this.isBlocked,
       lastActivity: lastActivity ?? this.lastActivity,
       fcmToken: fcmToken ?? this.fcmToken,
+      loginStreak: loginStreak ?? this.loginStreak,
+      lastStreakClaim: lastStreakClaim ?? this.lastStreakClaim,
     );
   }
 }
