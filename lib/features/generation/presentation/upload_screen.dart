@@ -19,6 +19,7 @@ import '../../../services/analytics_service.dart';
 import '../../../services/ad_service.dart';
 import '../../../models/user_model.dart';
 import '../../../providers/root_index_provider.dart';
+import '../../../core/widgets/zuno_watermark_badge.dart';
 
 class GenerationState {
   final File? referenceImage;
@@ -625,20 +626,11 @@ class _ResultView extends ConsumerWidget {
                         placeholder: (context, url) => Container(color: AppColors.surface),
                       ),
                       if (!genState.watermarkRemoved)
-                        IgnorePointer(
-                          child: Center(
-                            child: Transform.rotate(
-                              angle: -0.4,
-                              child: const Text(
-                                "ZUNO AI",
-                                style: TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                            ),
+                        const Positioned(
+                          right: 14,
+                          bottom: 14,
+                          child: IgnorePointer(
+                            child: ZunoWatermarkBadge(),
                           ),
                         ),
                     ],

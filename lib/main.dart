@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'core/theme/app_theme.dart';
+import 'core/widgets/zuno_loader.dart';
 import 'features/auth/presentation/blocked_screen.dart';
 import 'providers/user_provider.dart';
 import 'services/ad_service.dart';
@@ -63,13 +64,13 @@ class AuthWrapper extends ConsumerWidget {
         if (user != null) {
           return userAsync.when(
             data: (userData) {
-              if (userData == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+              if (userData == null) return const ZunoLoadingScreen();
               if (userData.isBlocked) {
                 return const BlockedScreen();
               }
               return const RootScreen();
             },
-            loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+            loading: () => const ZunoLoadingScreen(),
             error: (err, _) => Scaffold(body: Center(child: Text("Data Error: $err"))),
           );
         } else {
@@ -77,9 +78,7 @@ class AuthWrapper extends ConsumerWidget {
           return const RootScreen();
         }
       },
-      loading: () => const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const ZunoLoadingScreen(),
       error: (err, _) => Scaffold(
         body: Center(child: Text("Auth Error: $err")),
       ),
