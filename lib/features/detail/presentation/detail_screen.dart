@@ -11,7 +11,7 @@ import '../../../models/economy_config.dart';
 import '../../../core/widgets/auth_gatekeeper.dart';
 import '../../../core/utils/app_snackbar.dart';
 import '../../generation/presentation/upload_screen.dart';
-import '../../monetization/presentation/coin_dialog.dart';
+import '../../../core/widgets/insufficient_coins_sheet.dart';
 
 class DetailScreen extends ConsumerWidget {
   final ImagePrompt prompt;
@@ -65,6 +65,7 @@ class DetailScreen extends ConsumerWidget {
               children: [
                 IconButton(
                   icon: const FaIcon(FontAwesomeIcons.chevronLeft, color: Colors.white, size: 20),
+                  tooltip: "Back",
                   onPressed: () => Navigator.pop(context),
                 ),
                 Expanded(
@@ -156,10 +157,25 @@ class DetailScreen extends ConsumerWidget {
                                     ),
                                   );
                                 } else {
-                                  showDialog(
-                                    context: context,
-                                    builder: (context) => const CoinDialog(),
+                                  // Same insufficient-coins sheet used for the
+                                  // watermark unlock, so this prompt looks and
+                                  // behaves the same everywhere in the app. If
+                                  // the user earns enough via the ad, jump
+                                  // straight into generation instead of making
+                                  // them tap "Generate for Me" a second time.
+                                  final gotCoins = await InsufficientCoinsSheet.show(
+                                    context,
+                                    actionLabel: "Generating this image",
+                                    cost: config.generationCost,
                                   );
+                                  if (gotCoins && context.mounted) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => UploadScreen(prompt: prompt),
+                                      ),
+                                    );
+                                  }
                                 }
                               },
                               style: ElevatedButton.styleFrom(

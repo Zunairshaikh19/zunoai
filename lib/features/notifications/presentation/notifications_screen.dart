@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../providers/user_provider.dart';
 import '../../../models/notification_model.dart';
+import '../../../core/widgets/zuno_loader.dart';
+import '../../../core/widgets/zuno_error_view.dart';
+import '../../../core/theme/app_colors.dart';
 
 final notificationsProvider = StreamProvider.family<List<NotificationModel>, String>((ref, uid) {
   return ref.watch(firebaseServiceProvider).getNotifications(uid);
@@ -44,10 +47,10 @@ class NotificationsScreen extends ConsumerWidget {
               final note = notifications[index];
               return ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: note.isRead ? Colors.grey[800] : Colors.purpleAccent,
+                  backgroundColor: note.isRead ? Colors.grey[800] : AppColors.electricLime,
                   child: Icon(
                     note.isRead ? Icons.notifications_none : Icons.notifications_active,
-                    color: Colors.white,
+                    color: note.isRead ? Colors.white : Colors.black,
                   ),
                 ),
                 title: Text(
@@ -95,8 +98,12 @@ class NotificationsScreen extends ConsumerWidget {
             },
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => Center(child: Text("Error: $err")),
+        loading: () => const ZunoLoadingScreen(),
+        error: (err, _) => ZunoErrorView(
+          error: err,
+          title: "Couldn't load notifications",
+          onRetry: () => ref.invalidate(notificationsProvider(user.uid)),
+        ),
       ),
     );
   }

@@ -4,6 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../models/support_message.dart';
 import '../../../providers/user_provider.dart';
+import '../../../core/widgets/zuno_loader.dart';
+import '../../../core/widgets/zuno_error_view.dart';
+import '../../../core/utils/app_snackbar.dart';
+import '../../../core/theme/app_colors.dart';
 
 class SupportChatScreen extends ConsumerStatefulWidget {
   const SupportChatScreen({super.key});
@@ -17,10 +21,14 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
   File? _attachment;
 
   Future<void> _pickAttachment() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
-    if (pickedFile != null) {
-      setState(() => _attachment = File(pickedFile.path));
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
+      if (pickedFile != null) {
+        setState(() => _attachment = File(pickedFile.path));
+      }
+    } catch (e) {
+      if (mounted) AppSnackBar.showError(context, "Couldn't open your gallery: $e");
     }
   }
 
@@ -31,24 +39,28 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
     final user = ref.read(userProvider).value;
     if (user == null) return;
 
-    String? attachmentUrl;
-    if (_attachment != null) {
-      attachmentUrl = await ref.read(firebaseServiceProvider).uploadAttachment(_attachment!);
+    try {
+      String? attachmentUrl;
+      if (_attachment != null) {
+        attachmentUrl = await ref.read(firebaseServiceProvider).uploadAttachment(_attachment!);
+      }
+
+      final message = SupportMessage(
+        id: '',
+        senderId: user.uid,
+        text: text,
+        attachmentUrl: attachmentUrl,
+        timestamp: DateTime.now(),
+        isAdmin: false,
+      );
+
+      await ref.read(firebaseServiceProvider).sendSupportMessage(user.uid, message);
+
+      _textController.clear();
+      setState(() => _attachment = null);
+    } catch (e) {
+      if (mounted) AppSnackBar.showError(context, "Message couldn't be sent: $e");
     }
-
-    final message = SupportMessage(
-      id: '',
-      senderId: user.uid,
-      text: text,
-      attachmentUrl: attachmentUrl,
-      timestamp: DateTime.now(),
-      isAdmin: false,
-    );
-
-    await ref.read(firebaseServiceProvider).sendSupportMessage(user.uid, message);
-
-    _textController.clear();
-    setState(() => _attachment = null);
   }
 
   @override
@@ -78,8 +90,12 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
                   },
                 );
               },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => Center(child: Text("Error: $err")),
+              loading: () => const ZunoLoadingScreen(),
+              error: (err, _) => ZunoErrorView(
+                error: err,
+                title: "Couldn't load your messages",
+                onRetry: () => ref.invalidate(supportMessagesProvider(user.uid)),
+              ),
             ),
           ),
           if (_attachment != null)
@@ -92,7 +108,11 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
                   const SizedBox(width: 8),
                   const Text("Image attached"),
                   const Spacer(),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => _attachment = null)),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: "Remove attachment",
+                    onPressed: () => setState(() => _attachment = null),
+                  ),
                 ],
               ),
             ),
@@ -112,7 +132,11 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
       child: SafeArea(
         child: Row(
           children: [
-            IconButton(icon: const Icon(Icons.attach_file), onPressed: _pickAttachment),
+            IconButton(
+              icon: const Icon(Icons.attach_file),
+              tooltip: "Attach image",
+              onPressed: _pickAttachment,
+            ),
             Expanded(
               child: TextField(
                 controller: _textController,
@@ -125,7 +149,8 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.send, color: Colors.purpleAccent),
+              icon: const Icon(Icons.send, color: AppColors.electricLime),
+              tooltip: "Send message",
               onPressed: _sendMessage,
             ),
           ],
@@ -153,7 +178,7 @@ class _ChatBubble extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isMe ? Colors.purpleAccent : Colors.white10,
+          color: isMe ? AppColors.electricLime : Colors.white10,
           borderRadius: BorderRadius.circular(16).copyWith(
             bottomRight: isMe ? const Radius.circular(0) : const Radius.circular(16),
             bottomLeft: isMe ? const Radius.circular(16) : const Radius.circular(0),
@@ -174,7 +199,7 @@ class _ChatBubble extends StatelessWidget {
             if (message.text.isNotEmpty)
               Text(
                 message.text,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: isMe ? Colors.black : Colors.white),
               ),
           ],
         ),

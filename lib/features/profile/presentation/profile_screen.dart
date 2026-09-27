@@ -18,6 +18,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../monetization/presentation/paywall_screen.dart';
 
 import '../../notifications/presentation/support_chat_screen.dart';
+import '../../../core/widgets/dynamic_icon.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -33,6 +34,7 @@ class ProfileScreen extends ConsumerWidget {
         // instead switches the root tab index back to Dashboard (0).
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
+          tooltip: "Back to Dashboard",
           onPressed: () => ref.read(rootIndexProvider.notifier).state = 0,
         ),
         title: const Text("Profile", style: TextStyle(fontWeight: FontWeight.w900)),
@@ -45,33 +47,38 @@ class ProfileScreen extends ConsumerWidget {
             padding: const EdgeInsets.all(24.0),
             child: Column(
               children: [
-                GestureDetector(
-                  onTap: () => _pickAndUploadProfilePic(context, ref, user.uid),
-                  child: Stack(
-                    children: [
-                      CircleAvatar(
-                        radius: 50,
-                        backgroundColor: AppColors.electricLime.withOpacity(0.1),
-                        backgroundImage: user.photoUrl != null 
-                            ? CachedNetworkImageProvider(user.photoUrl!) 
-                            : null,
-                        child: user.photoUrl == null 
-                            ? const FaIcon(FontAwesomeIcons.solidUser, size: 40, color: AppColors.electricLime) 
-                            : null,
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: const BoxDecoration(
-                            color: AppColors.electricLime,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const FaIcon(FontAwesomeIcons.camera, size: 12, color: Colors.black),
+                Semantics(
+                  button: true,
+                  label: "Change profile picture",
+                  child: GestureDetector(
+                    onTap: () => _pickAndUploadProfilePic(context, ref, user.uid),
+                    child: Stack(
+                      children: [
+                        CircleAvatar(
+                          radius: 50,
+                          backgroundColor: AppColors.electricLime.withOpacity(0.1),
+                          backgroundImage: user.photoUrl != null
+                              ? CachedNetworkImageProvider(user.photoUrl!)
+                              : null,
+                          child: user.photoUrl == null
+                              ? const FaIcon(FontAwesomeIcons.solidUser, size: 40, color: AppColors.electricLime)
+                              : null,
                         ),
-                      ),
-                    ],
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: const BoxDecoration(
+                              color: AppColors.electricLime,
+                              shape: BoxShape.circle,
+                              border: Border.fromBorderSide(BorderSide(color: Colors.black, width: 2)),
+                            ),
+                            child: const FaIcon(FontAwesomeIcons.camera, size: 14, color: Colors.black),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -90,6 +97,7 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                     IconButton(
                       icon: const FaIcon(FontAwesomeIcons.penToSquare, size: 16, color: AppColors.electricLime),
+                      tooltip: "Edit name",
                       onPressed: () => _showEditNameDialog(context, ref, user.uid, user.displayName),
                     ),
                   ],
@@ -162,27 +170,25 @@ class ProfileScreen extends ConsumerWidget {
     final controller = TextEditingController(text: currentName);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Edit Name"),
+      builder: (context) => _ZunoDialog(
+        icon: FontAwesomeIcons.penToSquare,
+        title: "Edit Name",
         content: TextField(
           controller: controller,
+          autofocus: true,
           decoration: const InputDecoration(
             hintText: "Enter your name",
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () async {
-              if (controller.text.trim().isNotEmpty) {
-                await ref.read(firebaseServiceProvider).updateDisplayName(uid, controller.text.trim());
-                ref.invalidate(userProvider);
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("Save"),
-          ),
-        ],
+        cancelLabel: "Cancel",
+        confirmLabel: "Save",
+        onConfirm: () async {
+          if (controller.text.trim().isNotEmpty) {
+            await ref.read(firebaseServiceProvider).updateDisplayName(uid, controller.text.trim());
+            ref.invalidate(userProvider);
+            if (context.mounted) Navigator.pop(context);
+          }
+        },
       ),
     );
   }
@@ -222,6 +228,7 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   IconButton(
                     icon: const FaIcon(FontAwesomeIcons.copy, size: 18, color: Colors.white70),
+                    tooltip: "Copy referral code",
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: user.referralCode));
                       AppSnackBar.showSuccess(context, "Code copied to clipboard!");
@@ -229,6 +236,7 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   IconButton(
                     icon: const FaIcon(FontAwesomeIcons.shareNodes, size: 18, color: AppColors.electricLime),
+                    tooltip: "Share referral code",
                     onPressed: () {
                       Share.share(
                         "Join Zuno AI and get 40 free coins for AI image generation! Use my referral code: ${user.referralCode}",
@@ -263,34 +271,33 @@ class ProfileScreen extends ConsumerWidget {
     final controller = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Redeem Code"),
+      builder: (context) => _ZunoDialog(
+        icon: Icons.redeem,
+        title: "Redeem Code",
         content: TextField(
           controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
           decoration: const InputDecoration(
             hintText: "Enter friend's code",
             labelText: "Referral Code",
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                await ref.read(firebaseServiceProvider).redeemReferralCode(uid, controller.text.trim().toUpperCase());
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  AppSnackBar.showSuccess(context, "Bonus claimed successfully!");
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  AppSnackBar.showError(context, "Error: $e");
-                }
-              }
-            },
-            child: const Text("Claim Bonus"),
-          ),
-        ],
+        cancelLabel: "Cancel",
+        confirmLabel: "Claim Bonus",
+        onConfirm: () async {
+          try {
+            await ref.read(firebaseServiceProvider).redeemReferralCode(uid, controller.text.trim().toUpperCase());
+            if (context.mounted) {
+              Navigator.pop(context);
+              AppSnackBar.showSuccess(context, "Bonus claimed successfully!");
+            }
+          } catch (e) {
+            if (context.mounted) {
+              AppSnackBar.showError(context, "Error: $e");
+            }
+          }
+        },
       ),
     );
   }
@@ -352,7 +359,7 @@ class ProfileScreen extends ConsumerWidget {
     Color textColor = Colors.white,
   }) {
     return ListTile(
-      leading: _buildIcon(icon, iconColor),
+      leading: DynamicIcon(icon, size: 18, color: iconColor),
       title: Text(title, style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.w600)),
       trailing: const FaIcon(FontAwesomeIcons.chevronRight, color: Colors.white12, size: 14),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -360,11 +367,87 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildIcon(dynamic icon, Color color) {
-    const size = 18.0;
-    if (icon is FaIconData) {
-      return FaIcon(icon as FaIconData, color: color, size: size);
-    }
-    return Icon(icon as IconData, color: color, size: size);
+}
+
+/// Shared dark-themed dialog used across Profile so prompts like "Edit Name"
+/// and "Redeem Code" look like the rest of the app instead of the generic
+/// Material AlertDialog.
+class _ZunoDialog extends StatelessWidget {
+  final dynamic icon;
+  final String title;
+  final Widget content;
+  final String cancelLabel;
+  final String confirmLabel;
+  final Future<void> Function() onConfirm;
+
+  const _ZunoDialog({
+    required this.icon,
+    required this.title,
+    required this.content,
+    required this.cancelLabel,
+    required this.confirmLabel,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppColors.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.electricLime.withOpacity(0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: icon is FaIconData
+                      ? FaIcon(icon as FaIconData, size: 16, color: AppColors.electricLime)
+                      : Icon(icon as IconData, size: 18, color: AppColors.electricLime),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            content,
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(cancelLabel),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: onConfirm,
+                    child: Text(confirmLabel),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

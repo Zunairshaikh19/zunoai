@@ -346,6 +346,7 @@ class _AllCategoriesSheet extends ConsumerWidget {
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white70),
+                    tooltip: "Close",
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],

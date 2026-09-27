@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_colors.dart';
 
 class PrivacyPolicyScreen extends StatelessWidget {
   const PrivacyPolicyScreen({super.key});
@@ -49,7 +50,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
             Center(
               child: Text(
                 "contact@zunoai.example.com",
-                style: TextStyle(color: Colors.purpleAccent),
+                style: TextStyle(color: AppColors.electricLime),
               ),
             ),
           ],

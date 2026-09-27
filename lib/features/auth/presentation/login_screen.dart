@@ -142,12 +142,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   }
                 },
               ),
-              const SizedBox(height: 16),
-              SocialButton(
-                label: "Continue with Apple",
-                icon: FontAwesomeIcons.apple,
-                onPressed: () {}, // Mock
-              ),
               const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,

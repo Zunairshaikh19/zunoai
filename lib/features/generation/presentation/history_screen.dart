@@ -13,6 +13,8 @@ import '../../../models/user_model.dart';
 import '../../../providers/root_index_provider.dart';
 import '../../../core/utils/watermark.dart';
 import '../../../core/utils/app_snackbar.dart';
+import '../../../core/widgets/zuno_loader.dart';
+import '../../../core/widgets/zuno_error_view.dart';
 
 class HistoryScreen extends ConsumerWidget {
   const HistoryScreen({super.key});
@@ -96,20 +98,11 @@ class HistoryScreen extends ConsumerWidget {
               ],
             );
           },
-          loading: () => const Center(child: CircularProgressIndicator(color: AppColors.electricLime)),
-          error: (err, _) => Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error_outline, color: AppColors.error, size: 40),
-                const SizedBox(height: 8),
-                Text("Error: $err"),
-                TextButton(
-                  onPressed: () => ref.invalidate(historyProvider(user!.uid)), 
-                  child: const Text("Retry", style: TextStyle(color: AppColors.electricLime)),
-                ),
-              ],
-            ),
+          loading: () => const ZunoLoadingScreen(),
+          error: (err, _) => ZunoErrorView(
+            error: err,
+            title: "Couldn't load your masterpieces",
+            onRetry: () => ref.invalidate(historyProvider(user!.uid)),
           ),
         ),
       ),

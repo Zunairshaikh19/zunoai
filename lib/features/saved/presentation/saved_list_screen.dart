@@ -40,7 +40,7 @@ class SavedListScreen extends ConsumerWidget {
                       SizedBox(height: 8),
                       Text(
                         "Tap the bookmark icon on any image to save it here",
-                        style: TextStyle(fontSize: 13, color: Colors.white24),
+                        style: TextStyle(fontSize: 13, color: Colors.white54),
                       ),
                     ],
                   ),
@@ -116,7 +116,10 @@ class _SavedImageCard extends ConsumerWidget {
                 Positioned(
                   top: 12,
                   right: 12,
-                  child: GestureDetector(
+                  child: Semantics(
+                    button: true,
+                    label: "Remove from saved",
+                    child: GestureDetector(
                     onTap: () {
                       ref.read(savedPromptsProvider.notifier).toggleSave(prompt);
                       AppSnackBar.showInfo(context, "Removed from Saved List");
@@ -133,6 +136,7 @@ class _SavedImageCard extends ConsumerWidget {
                         size: 14,
                       ),
                     ),
+                  ),
                   ),
                 ),
               ],

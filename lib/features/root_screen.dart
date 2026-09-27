@@ -10,6 +10,7 @@ import '../providers/user_provider.dart';
 import '../models/user_model.dart';
 import '../services/ad_service.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../core/widgets/dynamic_icon.dart';
 
 class RootScreen extends ConsumerStatefulWidget {
   const RootScreen({super.key});
@@ -142,7 +143,7 @@ class _NavBarItem extends StatelessWidget {
         ),
         child: Row(
           children: [
-            _buildIcon(),
+            DynamicIcon(icon, size: 20, color: isSelected ? Colors.black : Colors.white70),
             if (isSelected) ...[
               const SizedBox(width: 8),
               Text(
@@ -158,14 +159,5 @@ class _NavBarItem extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Widget _buildIcon() {
-    final color = isSelected ? Colors.black : Colors.white70;
-    const size = 20.0;
-    if (icon is FaIconData) {
-      return FaIcon(icon as FaIconData, color: color, size: size);
-    }
-    return Icon(icon as IconData, color: color, size: size);
   }
 }

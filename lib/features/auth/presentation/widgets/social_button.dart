@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/dynamic_icon.dart';
 
 class SocialButton extends StatelessWidget {
   final String label;
@@ -20,7 +20,7 @@ class SocialButton extends StatelessWidget {
       height: 56,
       child: OutlinedButton.icon(
         onPressed: onPressed,
-        icon: _buildIcon(),
+        icon: DynamicIcon(icon, size: 20, color: Colors.white),
         label: Text(label),
         style: OutlinedButton.styleFrom(
           foregroundColor: Colors.white,
@@ -32,10 +32,4 @@ class SocialButton extends StatelessWidget {
     );
   }
 
-  Widget _buildIcon() {
-    if (icon is FaIconData) {
-      return FaIcon(icon as FaIconData, size: 20, color: Colors.white);
-    }
-    return Icon(icon as IconData, size: 20, color: Colors.white);
-  }
 }

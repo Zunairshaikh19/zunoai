@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../providers/user_provider.dart';
 import '../../../providers/economy_provider.dart';
@@ -9,6 +10,8 @@ import '../../../models/user_model.dart';
 import '../../../models/economy_config.dart';
 import '../../../core/utils/app_snackbar.dart';
 import '../../../services/analytics_service.dart';
+import '../../../core/widgets/zuno_loader.dart';
+import '../../../core/widgets/zuno_error_view.dart';
 import 'paywall_screen.dart';
 
 class CoinStoreScreen extends ConsumerWidget {
@@ -54,8 +57,12 @@ class CoinStoreScreen extends ConsumerWidget {
             ),
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => Center(child: Text("Error: $err")),
+        loading: () => const ZunoLoadingScreen(),
+        error: (err, _) => ZunoErrorView(
+          error: err,
+          title: "Couldn't load the vault",
+          onRetry: () => ref.invalidate(userProvider),
+        ),
       ),
     );
   }
@@ -77,9 +84,17 @@ class CoinStoreScreen extends ConsumerWidget {
             children: [
               const FaIcon(FontAwesomeIcons.coins, color: Colors.black87, size: 32),
               const SizedBox(width: 16),
-              Text(
-                "$coins",
-                style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900, color: Colors.black),
+              // A huge balance (promo credits, a test account, etc.) can be
+              // wider than the card at the base 48px size — shrink to fit
+              // instead of overflowing off the edge.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    NumberFormat.decimalPattern().format(coins),
+                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900, color: Colors.black),
+                  ),
+                ),
               ),
             ],
           ),

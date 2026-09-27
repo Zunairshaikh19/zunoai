@@ -364,6 +364,7 @@ class UploadScreen extends ConsumerWidget {
         title: const Text("Create Masterpiece", style: TextStyle(fontWeight: FontWeight.w900)),
         leading: IconButton(
           icon: const FaIcon(FontAwesomeIcons.chevronLeft, size: 20),
+          tooltip: "Back",
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -697,6 +698,7 @@ class _ResultView extends ConsumerWidget {
         title: const Text("Result Image", style: TextStyle(fontWeight: FontWeight.w900)),
         leading: IconButton(
           icon: const FaIcon(FontAwesomeIcons.chevronLeft, size: 20),
+          tooltip: "Back",
           onPressed: () => _leaveResult(ref),
         ),
         actions: [
