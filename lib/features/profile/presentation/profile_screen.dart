@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../models/user_model.dart';
+import '../../../providers/root_index_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../core/utils/app_snackbar.dart';
 import '../../notifications/presentation/notifications_screen.dart';
@@ -27,6 +28,13 @@ class ProfileScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
+        // Profile lives in the tab IndexedStack, not on the Navigator stack,
+        // so there's nothing for Flutter to auto-pop back to — this button
+        // instead switches the root tab index back to Dashboard (0).
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => ref.read(rootIndexProvider.notifier).state = 0,
+        ),
         title: const Text("Profile", style: TextStyle(fontWeight: FontWeight.w900)),
         backgroundColor: Colors.transparent,
       ),

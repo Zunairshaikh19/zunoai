@@ -38,16 +38,23 @@ class _RootScreenState extends ConsumerState<RootScreen> {
       AdService().maybeShowAppOpenInterstitial(isPremium: isPremium, onDone: () {});
     });
 
+    // Profile has its own back button (to Dashboard) instead of being a
+    // nav-bar destination you switch away from, so the floating nav bar is
+    // hidden while it's showing.
+    final isProfileTab = selectedIndex == 2;
+
     return Scaffold(
       extendBody: true, // Important for floating nav bar
       body: IndexedStack(
         index: selectedIndex,
         children: _screens,
       ),
-      bottomNavigationBar: _FloatingNavBar(
-        selectedIndex: selectedIndex,
-        onTap: (index) => ref.read(rootIndexProvider.notifier).state = index,
-      ),
+      bottomNavigationBar: isProfileTab
+          ? null
+          : _FloatingNavBar(
+              selectedIndex: selectedIndex,
+              onTap: (index) => ref.read(rootIndexProvider.notifier).state = index,
+            ),
     );
   }
 }

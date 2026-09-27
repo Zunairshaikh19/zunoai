@@ -226,19 +226,54 @@ class _CategoryFilterList extends ConsumerWidget {
   final List<ImagePrompt> allPrompts;
   const _CategoryFilterList({required this.allPrompts});
 
+  // With 25-30 categories, showing them all before "More" defeats the
+  // point — the user would have to scroll past nearly everything to reach
+  // it. Cap the row to a handful of visible chips and surface "More" right
+  // after them instead.
+  static const int _visibleChipCount = 4;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final categories = ["All", ...allPrompts.map((p) => p.category).toSet()];
     final selectedCategory = ref.watch(selectedCategoryProvider);
+
+    // If the selected category got scrolled out of the visible slice (picked
+    // from the "More" sheet), keep it pinned as the last visible chip so the
+    // row still shows what's active instead of looking like nothing is selected.
+    final selectedIndex = categories.indexOf(selectedCategory);
+    final visibleCategories = selectedIndex >= 0 && selectedIndex < categories.length && selectedIndex >= _visibleChipCount
+        ? [...categories.take(_visibleChipCount - 1), selectedCategory]
+        : categories.take(_visibleChipCount).toList();
+    final hasMore = categories.length > visibleCategories.length;
 
     return SizedBox(
       height: 50,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: categories.length,
+        // +1 for the trailing "More" chip (only when there's more to show)
+        // — opens the full list in a sheet instead of making the user
+        // scroll this row to find one.
+        itemCount: visibleCategories.length + (hasMore ? 1 : 0),
         itemBuilder: (context, index) {
-          final cat = categories[index];
+          if (index == visibleCategories.length) {
+            return Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: ActionChip(
+                avatar: const Icon(Icons.grid_view_rounded, size: 16, color: AppColors.electricLime),
+                label: const Text("More"),
+                onPressed: () => _showAllCategoriesSheet(context, ref, categories),
+                backgroundColor: Colors.white10,
+                labelStyle: const TextStyle(color: AppColors.electricLime, fontWeight: FontWeight.bold),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: const BorderSide(color: Colors.white10),
+                ),
+              ),
+            );
+          }
+
+          final cat = visibleCategories[index];
           final isSelected = selectedCategory == cat;
           return Padding(
             padding: const EdgeInsets.only(right: 8.0),
@@ -259,6 +294,119 @@ class _CategoryFilterList extends ConsumerWidget {
             ),
           );
         },
+      ),
+    );
+  }
+
+  void _showAllCategoriesSheet(BuildContext context, WidgetRef ref, List<String> categories) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => _AllCategoriesSheet(categories: categories, allPrompts: allPrompts),
+    );
+  }
+}
+
+class _AllCategoriesSheet extends ConsumerWidget {
+  final List<String> categories;
+  final List<ImagePrompt> allPrompts;
+  const _AllCategoriesSheet({required this.categories, required this.allPrompts});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedCategory = ref.watch(selectedCategoryProvider);
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.65,
+      minChildSize: 0.4,
+      maxChildSize: 0.9,
+      expand: false,
+      builder: (context, scrollController) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF101113),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+              child: Row(
+                children: [
+                  const Text(
+                    "All Categories",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: GridView.builder(
+                controller: scrollController,
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 2.6,
+                ),
+                itemCount: categories.length,
+                itemBuilder: (context, index) {
+                  final cat = categories[index];
+                  final isSelected = selectedCategory == cat;
+                  final count = cat == "All" ? allPrompts.length : allPrompts.where((p) => p.category == cat).length;
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () {
+                      ref.read(selectedCategoryProvider.notifier).state = cat;
+                      Navigator.pop(context);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppColors.electricLime.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: isSelected ? AppColors.electricLime : Colors.white10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            cat,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: isSelected ? AppColors.electricLime : Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            "$count style${count == 1 ? '' : 's'}",
+                            style: const TextStyle(fontSize: 11, color: Colors.white38),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
