@@ -3,11 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../models/user_model.dart';
+import '../../../models/economy_config.dart';
 import '../../../providers/root_index_provider.dart';
 import '../../../providers/user_provider.dart';
+import '../../../providers/economy_provider.dart';
+import '../../../providers/saved_prompts_provider.dart';
 import '../../../core/utils/app_snackbar.dart';
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../legal/presentation/privacy_policy_screen.dart';
+import '../../generation/presentation/history_screen.dart';
+import '../../saved/presentation/saved_list_screen.dart';
 
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -26,6 +31,7 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final userAsync = ref.watch(userProvider);
+    final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
 
     return Scaffold(
       appBar: AppBar(
@@ -43,81 +49,33 @@ class ProfileScreen extends ConsumerWidget {
       body: userAsync.when(
         data: (user) {
           if (user == null) return const Center(child: Text("Not Logged In"));
+
+          final creationsCount = ref.watch(historyProvider(user.uid)).valueOrNull?.length ?? 0;
+          final savedCount = ref.watch(savedPromptsProvider).length;
+          final weeklyCount = ref.watch(historyProvider(user.uid)).valueOrNull?.where(
+                (h) => h.timestamp.isAfter(DateTime.now().subtract(const Duration(days: 7))),
+              ).length ?? 0;
+
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Semantics(
-                  button: true,
-                  label: "Change profile picture",
-                  child: GestureDetector(
-                    onTap: () => _pickAndUploadProfilePic(context, ref, user.uid),
-                    child: Stack(
-                      children: [
-                        CircleAvatar(
-                          radius: 50,
-                          backgroundColor: AppColors.electricLime.withOpacity(0.1),
-                          backgroundImage: user.photoUrl != null
-                              ? CachedNetworkImageProvider(user.photoUrl!)
-                              : null,
-                          child: user.photoUrl == null
-                              ? const FaIcon(FontAwesomeIcons.solidUser, size: 40, color: AppColors.electricLime)
-                              : null,
-                        ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              color: AppColors.electricLime,
-                              shape: BoxShape.circle,
-                              border: Border.fromBorderSide(BorderSide(color: Colors.black, width: 2)),
-                            ),
-                            child: const FaIcon(FontAwesomeIcons.camera, size: 14, color: Colors.black),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                _buildHeader(context, ref, user),
                 const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      (user.displayName != null && user.displayName!.isNotEmpty) 
-                          ? user.displayName! 
-                          : user.email.split('@')[0], // Email ki bajaye name show hoga
-                      style: const TextStyle(
-                        fontSize: 22, 
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const FaIcon(FontAwesomeIcons.penToSquare, size: 16, color: AppColors.electricLime),
-                      tooltip: "Edit name",
-                      onPressed: () => _showEditNameDialog(context, ref, user.uid, user.displayName),
-                    ),
-                  ],
-                ),
-                Text(
-                  user.email,
-                  style: const TextStyle(color: Colors.white54, fontSize: 14),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  user.tier == UserTier.paid ? "Premium Member" : "Free Member",
-                  style: const TextStyle(color: AppColors.electricLime, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 32),
-                _buildReferralCard(context, user, ref),
-                const SizedBox(height: 32),
+                _buildStreakBanner(user),
+                const SizedBox(height: 16),
+                _buildAchievements(user, creationsCount),
+                const SizedBox(height: 16),
+                _buildStatsRow(user, creationsCount, savedCount),
+                const SizedBox(height: 16),
+                _buildReferralCard(context, user, ref, config),
+                const SizedBox(height: 16),
+                _buildQuickActions(context),
+                const SizedBox(height: 16),
+                _buildWeeklyActivity(weeklyCount),
+                const SizedBox(height: 16),
                 _buildSettingsList(context, ref),
-                // Clears the floating bottom nav bar (which overlays content
-                // since the Scaffold uses extendBody), so Logout is reachable.
-                const SizedBox(height: 100),
               ],
             ),
           );
@@ -147,10 +105,396 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  Widget _buildHeader(BuildContext context, WidgetRef ref, UserModel user) {
+    final isPaid = user.tier == UserTier.paid;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Semantics(
+          button: true,
+          label: "Change profile picture",
+          child: GestureDetector(
+            onTap: () => _pickAndUploadProfilePic(context, ref, user.uid),
+            child: Stack(
+              children: [
+                CircleAvatar(
+                  radius: 29,
+                  backgroundColor: AppColors.electricLime.withValues(alpha: 0.1),
+                  backgroundImage: user.photoUrl != null ? CachedNetworkImageProvider(user.photoUrl!) : null,
+                  child: user.photoUrl == null
+                      ? const FaIcon(FontAwesomeIcons.solidUser, size: 24, color: AppColors.electricLime)
+                      : null,
+                ),
+                Positioned(
+                  bottom: -2,
+                  right: -2,
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(
+                      color: AppColors.electricLime,
+                      shape: BoxShape.circle,
+                      border: Border.fromBorderSide(BorderSide(color: Colors.black, width: 2)),
+                    ),
+                    child: const FaIcon(FontAwesomeIcons.camera, size: 11, color: Colors.black),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      (user.displayName != null && user.displayName!.isNotEmpty)
+                          ? user.displayName!
+                          : user.email.split('@')[0],
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: Colors.white),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const FaIcon(FontAwesomeIcons.penToSquare, size: 13, color: AppColors.electricLime),
+                    tooltip: "Edit name",
+                    padding: const EdgeInsets.only(left: 4),
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _showEditNameDialog(context, ref, user.uid, user.displayName),
+                  ),
+                ],
+              ),
+              Text(
+                isPaid ? "Premium Member" : user.email,
+                style: TextStyle(color: isPaid ? AppColors.electricLime : Colors.white38, fontSize: 12, fontWeight: isPaid ? FontWeight.w700 : FontWeight.normal),
+              ),
+            ],
+          ),
+        ),
+        if (!isPaid)
+          TextButton(
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PaywallScreen())),
+            style: TextButton.styleFrom(
+              backgroundColor: AppColors.electricLime.withValues(alpha: 0.12),
+              foregroundColor: AppColors.electricLime,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: const StadiumBorder(),
+            ),
+            child: const Text("Upgrade", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildStreakBanner(UserModel user) {
+    final streak = user.loginStreak;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.orange.withValues(alpha: 0.14), AppColors.electricLime.withValues(alpha: 0.05)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Text("🔥", style: TextStyle(fontSize: 26)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("$streak-day streak", style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+                const Text("Come back tomorrow to keep it alive", style: TextStyle(fontSize: 11.5, color: Colors.white38)),
+              ],
+            ),
+          ),
+          Row(
+            children: List.generate(4, (i) {
+              final filled = i < streak.clamp(0, 4);
+              return Padding(
+                padding: const EdgeInsets.only(left: 3),
+                child: Container(
+                  width: 5,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: filled ? AppColors.electricLime : Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAchievements(UserModel user, int creationsCount) {
+    final badges = [
+      (icon: "🔥", label: "7-Day Streak", unlocked: user.loginStreak >= 7),
+      (icon: "creator", label: "Creator", unlocked: creationsCount >= 10),
+      (icon: "referral", label: "Referral Pro", unlocked: user.referralCount >= 5),
+      (icon: "premium", label: "Premium", unlocked: user.tier == UserTier.paid),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("ACHIEVEMENTS", style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Colors.white38, letterSpacing: 1.1)),
+        const SizedBox(height: 8),
+        Row(
+          children: badges.map((b) {
+            return Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Opacity(
+                  opacity: b.unlocked ? 1 : 0.4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: b.unlocked ? AppColors.electricLime.withValues(alpha: 0.25) : Colors.white.withValues(alpha: 0.08)),
+                    ),
+                    child: Column(
+                      children: [
+                        _achievementIcon(b.icon, b.unlocked),
+                        const SizedBox(height: 6),
+                        Text(
+                          b.label,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: b.unlocked ? 0.8 : 0.5)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _achievementIcon(String kind, bool unlocked) {
+    final color = unlocked ? AppColors.electricLime : Colors.white54;
+    switch (kind) {
+      case "🔥":
+        return const Text("🔥", style: TextStyle(fontSize: 16));
+      case "creator":
+        return FaIcon(FontAwesomeIcons.wandMagicSparkles, size: 15, color: color);
+      case "referral":
+        return FaIcon(FontAwesomeIcons.userGroup, size: 15, color: color);
+      default:
+        return FaIcon(FontAwesomeIcons.crown, size: 15, color: color);
+    }
+  }
+
+  Widget _buildStatsRow(UserModel user, int creationsCount, int savedCount) {
+    return Row(
+      children: [
+        Expanded(child: _statTile(_compact(user.coins), "COINS", valueColor: AppColors.electricLime)),
+        const SizedBox(width: 10),
+        Expanded(child: _statTile("$creationsCount", "CREATIONS")),
+        const SizedBox(width: 10),
+        Expanded(child: _statTile("$savedCount", "SAVED")),
+      ],
+    );
+  }
+
+  String _compact(int value) {
+    if (value >= 1000000) return "${(value / 1000000).toStringAsFixed(1)}M";
+    if (value >= 1000) return "${(value / 1000).toStringAsFixed(1)}K";
+    return "$value";
+  }
+
+  Widget _statTile(String value, String label, {Color valueColor = Colors.white}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Column(
+        children: [
+          Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: valueColor)),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white38, letterSpacing: 0.3)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReferralCard(BuildContext context, UserModel user, WidgetRef ref, EconomyConfig config) {
+    final canRedeem = user.referredBy == null;
+    const goal = 5;
+    final joined = user.referralCount.clamp(0, goal);
+    final remaining = (goal - joined).clamp(0, goal);
+    final progress = joined / goal;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  remaining == 0 ? "Referral goal reached!" : "Invite $remaining more friend${remaining == 1 ? '' : 's'}",
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                ),
+              ),
+              Text("+${config.referralReward} coins each", style: const TextStyle(fontSize: 11, color: AppColors.electricLime, fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(100),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              minHeight: 6,
+              backgroundColor: Colors.white.withValues(alpha: 0.08),
+              valueColor: const AlwaysStoppedAnimation(AppColors.electricLime),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  "$joined of $goal friends joined · code ${user.referralCode}",
+                  style: const TextStyle(fontSize: 10.5, color: Colors.white38),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                icon: const FaIcon(FontAwesomeIcons.copy, size: 14, color: Colors.white54),
+                tooltip: "Copy referral code",
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.only(left: 8),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: user.referralCode));
+                  AppSnackBar.showSuccess(context, "Code copied to clipboard!");
+                },
+              ),
+              IconButton(
+                icon: const FaIcon(FontAwesomeIcons.shareNodes, size: 14, color: AppColors.electricLime),
+                tooltip: "Share referral code",
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.only(left: 8),
+                onPressed: () {
+                  Share.share(
+                    "Join Zuno AI and get ${config.referralReward} free coins for AI image generation! Use my referral code: ${user.referralCode}",
+                  );
+                },
+              ),
+            ],
+          ),
+          if (canRedeem) ...[
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                icon: const Icon(Icons.redeem, size: 16),
+                label: const Text("Have a referral code?", style: TextStyle(fontSize: 12.5)),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 32)),
+                onPressed: () => _showRedeemDialog(context, ref, user.uid),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActions(BuildContext context) {
+    final actions = [
+      (icon: FontAwesomeIcons.images, label: "Creations", builder: (BuildContext c) => const HistoryScreen()),
+      (icon: FontAwesomeIcons.bookmark, label: "Saved", builder: (BuildContext c) => const SavedListScreen()),
+      (icon: FontAwesomeIcons.solidBell, label: "Alerts", builder: (BuildContext c) => const NotificationsScreen()),
+      (icon: FontAwesomeIcons.shieldHalved, label: "Privacy", builder: (BuildContext c) => const PrivacyPolicyScreen()),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("QUICK ACTIONS", style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Colors.white38, letterSpacing: 1.1)),
+        const SizedBox(height: 8),
+        Row(
+          children: actions.map((a) {
+            return Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: a.builder)),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+                    ),
+                    child: Column(
+                      children: [
+                        FaIcon(a.icon, size: 17, color: Colors.white70),
+                        const SizedBox(height: 6),
+                        Text(a.label, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white70)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWeeklyActivity(int weeklyCount) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          const FaIcon(FontAwesomeIcons.boltLightning, size: 17, color: AppColors.electricLime),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Text(
+              weeklyCount == 0
+                  ? "No generations yet this week"
+                  : "$weeklyCount generation${weeklyCount == 1 ? '' : 's'} this week",
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _pickAndUploadProfilePic(BuildContext context, WidgetRef ref, String uid) async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
-    
+
     if (pickedFile != null) {
       try {
         await ref.read(firebaseServiceProvider).uploadProfilePicture(uid, File(pickedFile.path));
@@ -193,80 +537,6 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildReferralCard(BuildContext context, UserModel user, WidgetRef ref) {
-    final canRedeem = user.referredBy == null;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          children: [
-            const Text(
-              "Refer & Earn",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "Share your code with friends. Both get 40 coins (1 free generation) when they join!",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    user.referralCode,
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
-                  ),
-                  IconButton(
-                    icon: const FaIcon(FontAwesomeIcons.copy, size: 18, color: Colors.white70),
-                    tooltip: "Copy referral code",
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: user.referralCode));
-                      AppSnackBar.showSuccess(context, "Code copied to clipboard!");
-                    },
-                  ),
-                  IconButton(
-                    icon: const FaIcon(FontAwesomeIcons.shareNodes, size: 18, color: AppColors.electricLime),
-                    tooltip: "Share referral code",
-                    onPressed: () {
-                      Share.share(
-                        "Join Zuno AI and get 40 free coins for AI image generation! Use my referral code: ${user.referralCode}",
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              "Friends joined: ${user.referralCount}",
-              style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.electricLime),
-            ),
-            if (canRedeem) ...[
-              const SizedBox(height: 16),
-              const Divider(),
-              const SizedBox(height: 16),
-              TextButton.icon(
-                icon: const Icon(Icons.redeem),
-                label: const Text("Have a referral code?"),
-                onPressed: () => _showRedeemDialog(context, ref, user.uid),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showRedeemDialog(BuildContext context, WidgetRef ref, String uid) {
     final controller = TextEditingController();
     showDialog(
@@ -303,51 +573,43 @@ class ProfileScreen extends ConsumerWidget {
   }
 
   Widget _buildSettingsList(BuildContext context, WidgetRef ref) {
-    return Column(
-      children: [
-        _buildSettingsTile(
-          icon: FontAwesomeIcons.crown,
-          title: "Zuno Premium",
-          iconColor: Colors.amber,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const PaywallScreen()),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Column(
+        children: [
+          _buildSettingsTile(
+            icon: FontAwesomeIcons.crown,
+            title: "Zuno Premium",
+            iconColor: Colors.amber,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const PaywallScreen()),
+            ),
           ),
-        ),
-        _buildSettingsTile(
-          icon: FontAwesomeIcons.solidBell,
-          title: "Notifications",
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+          _buildSettingsTile(
+            icon: FontAwesomeIcons.headset,
+            title: "Support Center",
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SupportChatScreen()),
+            ),
           ),
-        ),
-        _buildSettingsTile(
-          icon: FontAwesomeIcons.headset,
-          title: "Support Center",
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const SupportChatScreen()),
+          _buildSettingsTile(
+            icon: FontAwesomeIcons.rightFromBracket,
+            title: "Logout",
+            iconColor: Colors.redAccent,
+            textColor: Colors.redAccent,
+            isLast: true,
+            onTap: () async {
+              await ref.read(firebaseServiceProvider).signOut();
+            },
           ),
-        ),
-        _buildSettingsTile(
-          icon: FontAwesomeIcons.shieldHalved,
-          title: "Privacy & Security",
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const PrivacyPolicyScreen()),
-          ),
-        ),
-        _buildSettingsTile(
-          icon: FontAwesomeIcons.rightFromBracket,
-          title: "Logout",
-          iconColor: Colors.redAccent,
-          textColor: Colors.redAccent,
-          onTap: () async {
-            await ref.read(firebaseServiceProvider).signOut();
-          },
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -357,16 +619,21 @@ class ProfileScreen extends ConsumerWidget {
     required VoidCallback onTap,
     Color iconColor = Colors.white70,
     Color textColor = Colors.white,
+    bool isLast = false,
   }) {
-    return ListTile(
-      leading: DynamicIcon(icon, size: 18, color: iconColor),
-      title: Text(title, style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.w600)),
-      trailing: const FaIcon(FontAwesomeIcons.chevronRight, color: Colors.white12, size: 14),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      onTap: onTap,
+    return Container(
+      decoration: BoxDecoration(
+        border: isLast ? null : const Border(bottom: BorderSide(color: Colors.white10)),
+      ),
+      child: ListTile(
+        leading: DynamicIcon(icon, size: 18, color: iconColor),
+        title: Text(title, style: TextStyle(color: textColor, fontSize: 14.5, fontWeight: FontWeight.w700)),
+        trailing: const FaIcon(FontAwesomeIcons.chevronRight, color: Colors.white24, size: 13),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        onTap: onTap,
+      ),
     );
   }
-
 }
 
 /// Shared dark-themed dialog used across Profile so prompts like "Edit Name"

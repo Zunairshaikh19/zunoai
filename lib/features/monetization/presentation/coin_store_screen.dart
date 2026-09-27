@@ -12,6 +12,7 @@ import '../../../core/utils/app_snackbar.dart';
 import '../../../services/analytics_service.dart';
 import '../../../core/widgets/zuno_loader.dart';
 import '../../../core/widgets/zuno_error_view.dart';
+import '../../profile/presentation/profile_screen.dart';
 import 'paywall_screen.dart';
 
 class CoinStoreScreen extends ConsumerWidget {
@@ -30,28 +31,26 @@ class CoinStoreScreen extends ConsumerWidget {
       body: userAsync.when(
         data: (user) {
           if (user == null) return const Center(child: Text("Please log in"));
-          
+
           final adLimit = user.tier == UserTier.paid ? config.premiumAdLimitPerDay : config.freeAdLimitPerDay;
           final canWatchAd = user.dailyAdsWatched < adLimit;
+          final dailyBonus = user.tier == UserTier.paid ? config.dailyBonusPremium : config.dailyBonusFree;
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Current Balance Card
                 _buildBalanceCard(user.coins),
-                const SizedBox(height: 32),
-
-                // Earn Section
-                _buildSectionTitle("Earn Free Coins"),
                 const SizedBox(height: 16),
-                _buildAdCard(context, ref, user.dailyAdsWatched, adLimit, canWatchAd, config.adRewardAmount),
-                
-                const SizedBox(height: 40),
-                
-                // Buy Section
-                _buildSectionTitle("Premium Plan"),
+                _buildStatsRow(user, adLimit),
                 const SizedBox(height: 16),
+                _buildAdProgressCard(context, ref, user.dailyAdsWatched, adLimit, canWatchAd, config.adRewardAmount),
+                const SizedBox(height: 24),
+                const Text("Earn more", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: AppColors.electricLime)),
+                const SizedBox(height: 14),
+                _buildEarnGrid(context, dailyBonus, config.referralReward),
+                const SizedBox(height: 24),
                 _buildSubscriptionCard(context),
               ],
             ),
@@ -70,128 +69,209 @@ class CoinStoreScreen extends ConsumerWidget {
   Widget _buildBalanceCard(int coins) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.electricLime,
-        borderRadius: BorderRadius.circular(24),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Your Balance", style: TextStyle(color: Colors.black54, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
+          const Text("Your Balance", style: TextStyle(color: Colors.white38, fontWeight: FontWeight.bold, fontSize: 12)),
+          const SizedBox(height: 6),
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const FaIcon(FontAwesomeIcons.coins, color: Colors.black87, size: 32),
-              const SizedBox(width: 16),
-              // A huge balance (promo credits, a test account, etc.) can be
-              // wider than the card at the base 48px size — shrink to fit
-              // instead of overflowing off the edge.
+              const FaIcon(FontAwesomeIcons.coins, color: AppColors.electricLime, size: 20),
+              const SizedBox(width: 10),
               Flexible(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
                   child: Text(
                     NumberFormat.decimalPattern().format(coins),
-                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900, color: Colors.black),
+                    style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: Colors.white),
                   ),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 2),
+          const Text("Zuno Coins", style: TextStyle(color: AppColors.electricLime, fontSize: 12, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsRow(UserModel user, int adLimit) {
+    return Row(
+      children: [
+        Expanded(child: _statTile("${user.dailyAdsWatched}/$adLimit", "ADS TODAY")),
+        const SizedBox(width: 10),
+        Expanded(child: _statTile("${user.loginStreak}🔥", "DAY STREAK", valueColor: AppColors.electricLime)),
+        const SizedBox(width: 10),
+        Expanded(child: _statTile("${user.referralCount}", "FRIENDS REFERRED")),
+      ],
+    );
+  }
+
+  Widget _statTile(String value, String label, {Color valueColor = Colors.white}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Column(
+        children: [
+          Text(value, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: valueColor)),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white38, letterSpacing: 0.3),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Text(
-        title,
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.electricLime),
+  Widget _buildAdProgressCard(BuildContext context, WidgetRef ref, int watched, int limit, bool canWatch, int rewardAmount) {
+    final fraction = limit == 0 ? 0.0 : (watched / limit).clamp(0.0, 1.0);
+    final remaining = (limit - watched).clamp(0, limit);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 52,
+            height: 52,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: CircularProgressIndicator(
+                    value: fraction,
+                    strokeWidth: 5,
+                    backgroundColor: Colors.white.withValues(alpha: 0.08),
+                    valueColor: const AlwaysStoppedAnimation(AppColors.electricLime),
+                  ),
+                ),
+                Text("$watched/$limit", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Daily ad limit", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+                const SizedBox(height: 2),
+                Text(
+                  canWatch ? "$remaining more today · get $rewardAmount coins" : "Come back tomorrow for more",
+                  style: const TextStyle(color: Colors.white38, fontSize: 11.5),
+                ),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: !canWatch ? null : () => _showAd(context, ref, rewardAmount),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.electricLime,
+              foregroundColor: Colors.black,
+              disabledBackgroundColor: Colors.white10,
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              shape: const StadiumBorder(),
+            ),
+            child: const Text("Play", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildAdCard(BuildContext context, WidgetRef ref, int watched, int limit, bool canWatch, int rewardAmount) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: const BorderSide(color: Colors.white10),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.electricLime.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const FaIcon(FontAwesomeIcons.circlePlay, size: 24, color: AppColors.electricLime),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("Watch & Earn", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
-                  Text("Get $rewardAmount coins ($watched/$limit today)", style: const TextStyle(color: Colors.white38, fontSize: 12)),
-                ],
-              ),
-            ),
-            ElevatedButton(
-              onPressed: !canWatch ? null : () {
-                _showAd(context, ref, rewardAmount);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.electricLime,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                shape: const StadiumBorder(),
-              ),
-              child: const Text("Play", style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
+  Widget _buildEarnGrid(BuildContext context, int dailyBonus, int referralReward) {
+    return Row(
+      children: [
+        Expanded(
+          child: _earnCard(
+            icon: FontAwesomeIcons.solidStar,
+            title: "Daily Bonus",
+            subtitle: "+$dailyBonus coins · auto-credited",
+          ),
         ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _earnCard(
+            icon: FontAwesomeIcons.userPlus,
+            title: "Invite Friend",
+            subtitle: "+$referralReward coins each",
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _earnCard({required FaIconData icon, required String title, required String subtitle, VoidCallback? onTap}) {
+    final card = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FaIcon(icon, size: 18, color: AppColors.electricLime),
+          const SizedBox(height: 10),
+          Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(subtitle, style: const TextStyle(fontSize: 10.5, color: Colors.white38)),
+        ],
       ),
     );
+
+    if (onTap == null) return card;
+    return GestureDetector(onTap: onTap, child: card);
   }
 
   Widget _buildSubscriptionCard(BuildContext context) {
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PaywallScreen())),
       child: Container(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(32),
-          border: Border.all(color: AppColors.electricLime.withValues(alpha: 0.5), width: 2),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.electricLime.withValues(alpha: 0.1),
-              blurRadius: 20,
-              spreadRadius: 2,
-            ),
-          ],
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
         ),
         child: const Row(
           children: [
-            FaIcon(FontAwesomeIcons.crown, color: Colors.amber, size: 24),
-            SizedBox(width: 20),
+            FaIcon(FontAwesomeIcons.crown, color: Colors.amber, size: 20),
+            SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Zuno AI Premium", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.white)),
-                  SizedBox(height: 4),
-                  Text("Unlimited access & Pro features", style: TextStyle(fontSize: 13, color: Colors.white38)),
+                  Text("Zuno AI Premium", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: Colors.white)),
+                  SizedBox(height: 3),
+                  Text("Unlimited access & Pro features", style: TextStyle(fontSize: 12, color: Colors.white38)),
                 ],
               ),
             ),
-            FaIcon(FontAwesomeIcons.chevronRight, color: AppColors.electricLime, size: 16),
+            FaIcon(FontAwesomeIcons.chevronRight, color: AppColors.electricLime, size: 14),
           ],
         ),
       ),
