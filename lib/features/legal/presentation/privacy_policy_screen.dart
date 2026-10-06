@@ -38,7 +38,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
             Text("3. Ads & Monetization", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             SizedBox(height: 8),
             Text(
-              "We use Google Mobile Ads and Unity Ads to provide free generations. These services may collect certain device identifiers as per their own privacy policies.",
+              "We use Google AdMob to provide free coins. These services may collect certain device identifiers as per their own privacy policies.",
             ),
             SizedBox(height: 24),
             Text("4. Your Rights", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),

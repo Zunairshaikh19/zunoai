@@ -11,6 +11,7 @@ import '../../../models/economy_config.dart';
 import '../../../core/widgets/auth_gatekeeper.dart';
 import '../../../core/utils/app_snackbar.dart';
 import '../../generation/presentation/upload_screen.dart';
+import '../../monetization/presentation/paywall_screen.dart';
 import '../../../core/widgets/insufficient_coins_sheet.dart';
 
 class DetailScreen extends ConsumerWidget {
@@ -146,6 +147,15 @@ class DetailScreen extends ConsumerWidget {
 
                                 if (user == null) {
                                   AppSnackBar.showError(context, "Please try again in a moment.");
+                                  return;
+                                }
+
+                                if (prompt.isPremium && !user.isPremium) {
+                                  AppSnackBar.showInfo(context, "This is a Premium style.");
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (context) => const PaywallScreen()),
+                                  );
                                   return;
                                 }
 

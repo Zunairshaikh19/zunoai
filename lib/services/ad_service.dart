@@ -1,18 +1,78 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'package:unity_ads_plugin/unity_ads_plugin.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// What happened when a rewarded ad was shown.
+enum RewardedOutcome {
+  /// The user watched the ad to the end. Coins are credited by the *server*
+  /// once Google's server-side verification (SSV) callback arrives.
+  earned,
+
+  /// The user closed the ad early — no reward.
+  dismissed,
+
+  /// No ad was available (not loaded / failed to show / consent missing).
+  unavailable,
+}
+
+/// AdMob wrapper. Production ad unit ids are passed at build time:
+///
+///   flutter build appbundle --release \
+///     --dart-define=ADMOB_REWARDED_ANDROID=ca-app-pub-XXXX/1111111111 \
+///     --dart-define=ADMOB_INTERSTITIAL_ANDROID=ca-app-pub-XXXX/2222222222 \
+///     --dart-define=ADMOB_NATIVE_ANDROID=ca-app-pub-XXXX/3333333333
+///
+/// (and `-PADMOB_APP_ID=ca-app-pub-XXXX~YYYY` for Gradle, see
+/// PRODUCTION_CHECKLIST.md). Without them Google's *test* ids are used.
 class AdService {
   static final AdService _instance = AdService._internal();
   factory AdService() => _instance;
   AdService._internal();
 
+  // Google's official demo ids — used only when no real id is supplied.
+  static const _testRewardedAndroid = 'ca-app-pub-3940256099942544/5224354917';
+  static const _testRewardedIos = 'ca-app-pub-3940256099942544/1712485313';
+  static const _testInterstitialAndroid = 'ca-app-pub-3940256099942544/1033173712';
+  static const _testInterstitialIos = 'ca-app-pub-3940256099942544/4411468910';
+  static const _testNativeAndroid = 'ca-app-pub-3940256099942544/2247696110';
+  static const _testNativeIos = 'ca-app-pub-3940256099942544/3986624511';
+
+  static const _rewardedAndroid =
+      String.fromEnvironment('ADMOB_REWARDED_ANDROID', defaultValue: _testRewardedAndroid);
+  static const _rewardedIos = String.fromEnvironment('ADMOB_REWARDED_IOS', defaultValue: _testRewardedIos);
+  static const _interstitialAndroid =
+      String.fromEnvironment('ADMOB_INTERSTITIAL_ANDROID', defaultValue: _testInterstitialAndroid);
+  static const _interstitialIos =
+      String.fromEnvironment('ADMOB_INTERSTITIAL_IOS', defaultValue: _testInterstitialIos);
+  static const _nativeAndroid = String.fromEnvironment('ADMOB_NATIVE_ANDROID', defaultValue: _testNativeAndroid);
+  static const _nativeIos = String.fromEnvironment('ADMOB_NATIVE_IOS', defaultValue: _testNativeIos);
+
+  String get _rewardedId => Platform.isAndroid ? _rewardedAndroid : _rewardedIos;
+  String get _interstitialId => Platform.isAndroid ? _interstitialAndroid : _interstitialIos;
+  String get nativeAdUnitId => Platform.isAndroid ? _nativeAndroid : _nativeIos;
+
+  /// True while any ad unit is still Google's demo id (=> earns nothing).
+  bool get usingTestIds =>
+      _rewardedId == _testRewardedAndroid ||
+      _rewardedId == _testRewardedIos ||
+      _interstitialId == _testInterstitialAndroid ||
+      _interstitialId == _testInterstitialIos;
+
+  // Native ad card slotted into the dashboard feed. `nativeAdFactoryId` must
+  // match the id string MainActivity.kt registers (see NativeAdFactoryImpl).
+  static const String nativeAdFactoryId = 'dashboardNativeAd';
+
   InterstitialAd? _interstitialAd;
   RewardedAd? _rewardedAd;
   bool _isRewardedAdLoading = false;
   bool _isInterstitialAdLoading = false;
+  bool _initialized = false;
+  bool _canRequestAds = false;
+
+  /// True once consent allows requesting ads (GDPR/UK/EEA via Google UMP).
+  bool get canRequestAds => _canRequestAds;
 
   // App-open interstitial: at most once per cooldown window, and never twice
   // in the same app run even if something re-triggers the check.
@@ -20,46 +80,61 @@ class AdService {
   static const _appOpenCooldown = Duration(hours: 1);
   bool _hasShownAppOpenAdThisSession = false;
 
-  final String _googleInterstitialId = Platform.isAndroid 
-      ? 'ca-app-pub-3940256099942544/1033173712' 
-      : 'ca-app-pub-3940256099942544/4411468910';
-      
-  final String _googleRewardedId = Platform.isAndroid
-      ? 'ca-app-pub-3940256099942544/5224354917'
-      : 'ca-app-pub-3940256099942544/1712485313';
-
-  // Native ad card slotted into the dashboard feed. `nativeAdFactoryId` must
-  // match the id string MainActivity.kt registers (see NativeAdFactoryImpl).
-  static const String nativeAdFactoryId = 'dashboardNativeAd';
-  final String nativeAdUnitId = Platform.isAndroid
-      ? 'ca-app-pub-3940256099942544/2247696110'
-      : 'ca-app-pub-3940256099942544/3986624511';
-
-  final String _unityGameId = Platform.isAndroid ? '1234567' : '1234568';
-  final String _unityRewardedPlacement = 'rewardedVideo';
-
+  /// Call once after the first frame (the consent form needs a visible screen).
   Future<void> init() async {
-    try {
-      await MobileAds.instance.initialize();
-      await UnityAds.init(
-        gameId: _unityGameId,
-        testMode: kDebugMode,
-        onComplete: () => debugPrint('Unity Ads Initialized'),
-        onFailed: (error, message) => debugPrint('Unity Ads Init Failed: $error $message'),
+    if (_initialized) return;
+    _initialized = true;
+
+    if (kReleaseMode && usingTestIds) {
+      debugPrint(
+        'WARNING: AdMob is using Google TEST ad unit ids in a RELEASE build — '
+        'no real revenue. Pass the ADMOB_* --dart-define values (see PRODUCTION_CHECKLIST.md).',
       );
+    }
+
+    try {
+      await _gatherConsent();
+      _canRequestAds = await ConsentInformation.instance.canRequestAds();
+      if (!_canRequestAds) return;
+      await MobileAds.instance.initialize();
     } catch (e) {
       debugPrint("AdService Init Error: $e");
+      return;
     }
     loadInterstitial();
     loadRewarded();
   }
 
+  /// Google UMP consent flow (required for UK/EEA users). No-op where not required.
+  Future<void> _gatherConsent() async {
+    final done = Completer<void>();
+    ConsentInformation.instance.requestConsentInfoUpdate(
+      ConsentRequestParameters(),
+      () async {
+        try {
+          await ConsentForm.loadAndShowConsentFormIfRequired((FormError? error) {
+            if (error != null) debugPrint('Consent form error: ${error.message}');
+            if (!done.isCompleted) done.complete();
+          });
+        } catch (e) {
+          debugPrint('Consent form failed: $e');
+          if (!done.isCompleted) done.complete();
+        }
+      },
+      (FormError error) {
+        debugPrint('Consent info update failed: ${error.message}');
+        if (!done.isCompleted) done.complete();
+      },
+    );
+    await done.future.timeout(const Duration(seconds: 30), onTimeout: () {});
+  }
+
   void loadInterstitial() {
-    if (_isInterstitialAdLoading || _interstitialAd != null) return;
+    if (!_canRequestAds || _isInterstitialAdLoading || _interstitialAd != null) return;
     _isInterstitialAdLoading = true;
 
     InterstitialAd.load(
-      adUnitId: _googleInterstitialId,
+      adUnitId: _interstitialId,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
@@ -103,33 +178,34 @@ class AdService {
   }
 
   void showInterstitial(VoidCallback onDismissed) {
-    if (_interstitialAd != null) {
-      _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
-        onAdDismissedFullScreenContent: (ad) {
-          ad.dispose();
-          _interstitialAd = null;
-          loadInterstitial();
-          onDismissed();
-        },
-        onAdFailedToShowFullScreenContent: (ad, error) {
-          ad.dispose();
-          _interstitialAd = null;
-          loadInterstitial();
-          onDismissed();
-        },
-      );
-      _interstitialAd!.show();
-    } else {
+    final ad = _interstitialAd;
+    if (ad == null) {
+      loadInterstitial();
       onDismissed();
+      return;
     }
+    _interstitialAd = null;
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        loadInterstitial();
+        onDismissed();
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        ad.dispose();
+        loadInterstitial();
+        onDismissed();
+      },
+    );
+    ad.show();
   }
 
   void loadRewarded() {
-    if (_isRewardedAdLoading || _rewardedAd != null) return;
+    if (!_canRequestAds || _isRewardedAdLoading || _rewardedAd != null) return;
     _isRewardedAdLoading = true;
 
     RewardedAd.load(
-      adUnitId: _googleRewardedId,
+      adUnitId: _rewardedId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: (ad) {
@@ -145,51 +221,48 @@ class AdService {
     );
   }
 
-  void showRewarded({
-    required Function(RewardItem) onReward,
-    required VoidCallback onFailed,
-  }) {
-    if (_rewardedAd != null) {
-      bool rewardEarned = false;
-
-      _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
-        onAdDismissedFullScreenContent: (ad) {
-          ad.dispose();
-          _rewardedAd = null;
-          loadRewarded();
-        },
-        onAdFailedToShowFullScreenContent: (ad, error) {
-          ad.dispose();
-          _rewardedAd = null;
-          loadRewarded();
-          _showUnityRewarded(onReward, onFailed);
-        },
-      );
-
-      _rewardedAd!.show(onUserEarnedReward: (ad, reward) {
-        if (!rewardEarned) {
-          rewardEarned = true;
-          onReward(reward);
-        }
-      });
-    } else {
-      _showUnityRewarded(onReward, onFailed);
+  /// Waits (briefly) for a rewarded ad to be ready, loading one if needed.
+  Future<bool> _ensureRewardedReady() async {
+    if (_rewardedAd != null) return true;
+    loadRewarded();
+    for (var i = 0; i < 12; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (_rewardedAd != null) return true;
+      if (!_isRewardedAdLoading) loadRewarded();
     }
+    return _rewardedAd != null;
   }
 
-  void _showUnityRewarded(Function(RewardItem) onReward, VoidCallback onFailed) {
-    try {
-      UnityAds.showVideoAd(
-        placementId: _unityRewardedPlacement,
-        onComplete: (placementId) => onReward(RewardItem(40, 'coins')),
-        onFailed: (placementId, error, message) {
-          debugPrint("Unity Ad Failed: $error $message");
-          onFailed();
-        },
-      );
-    } catch (e) {
-      debugPrint("Unity Ads Error: $e");
-      onFailed();
-    }
+  /// Shows a rewarded ad tagged with the user's id for server-side
+  /// verification. The reward itself is credited by the backend (admob-ssv),
+  /// never by this method — the app only learns whether the ad was completed.
+  Future<RewardedOutcome> showRewarded({required String userId}) async {
+    if (!await _ensureRewardedReady()) return RewardedOutcome.unavailable;
+    final ad = _rewardedAd!;
+    _rewardedAd = null;
+
+    final completer = Completer<RewardedOutcome>();
+    var earned = false;
+
+    await ad.setServerSideOptions(ServerSideVerificationOptions(userId: userId));
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        loadRewarded();
+        if (!completer.isCompleted) {
+          completer.complete(earned ? RewardedOutcome.earned : RewardedOutcome.dismissed);
+        }
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        debugPrint("Rewarded ad failed to show: $error");
+        ad.dispose();
+        loadRewarded();
+        if (!completer.isCompleted) completer.complete(RewardedOutcome.unavailable);
+      },
+    );
+    ad.show(onUserEarnedReward: (ad, reward) {
+      earned = true;
+    });
+    return completer.future;
   }
 }

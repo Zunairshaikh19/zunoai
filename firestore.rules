@@ -1,5 +1,14 @@
 rules_version = '2';
 
+// SECURITY MODEL
+// --------------
+// Money-like state (coins, tier/premium, ad counters, streak, referral data)
+// is NEVER writable by the mobile client. It is changed only by the Supabase
+// Edge Functions (economy, generate-image, confirm-purchase, admob-ssv), which
+// use a service account and therefore bypass these rules.
+// The client may only touch harmless profile fields (name, photo, gender,
+// push token, last-activity).
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -16,13 +25,9 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
-    // True only if the caller's own profile records that `inviterUid`'s referral
-    // code actually referred them in — proving a real referral relationship
-    // rather than an arbitrary write to someone else's document.
-    function isLegitReferralCredit(inviterUid) {
-      return isSignedIn() && request.auth.uid != inviterUid &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.referredBy ==
-        get(/databases/$(database)/documents/users/$(inviterUid)).data.referralCode;
+    // Fields that actually change in an update.
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
     }
 
     // Admin allowlist — add a document with the admin's Firebase Auth uid as the
@@ -32,102 +37,80 @@ service cloud.firestore {
       allow write: if false; // manage via Firebase console / Admin SDK only
     }
 
-    // Maps a referral code -> owning uid, so a user can look up "whose code is
-    // this?" without needing read access to arbitrary user profiles.
+    // referral code -> owner uid. Created and read only by the economy function.
     match /referralCodes/{code} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if false;
+      allow read, write: if false;
     }
 
     match /prompts/{promptId} {
       // Public style catalog — guests browse the dashboard before signing in.
+      // The secret prompt text lives in promptSecrets (admin/server only).
       allow read: if true;
       allow write: if isAdmin();
     }
 
+    match /promptSecrets/{promptId} {
+      allow read, write: if isAdmin();
+    }
+
     match /settings/config {
       // Holds the AI provider API key — never exposed to the mobile client.
-      // The generation backend reads this with a service-account credential,
-      // which bypasses these rules entirely.
       allow read, write: if isAdmin();
     }
 
     match /settings/economy {
-      // Coin amounts / limits only — no secrets — so the app can read live
-      // values without a store release, while only admins can change them.
-      allow read: if isSignedIn();
+      // Coin amounts / limits only — no secrets. Readable by everyone (guests
+      // included) so the UI shows live numbers; only admins can change them.
+      allow read: if true;
       allow write: if isAdmin();
     }
 
     match /users/{uid} {
       allow read: if isOwner(uid) || isAdmin();
-      allow create: if isOwner(uid);
 
-      // A user may let their own expired subscription lapse (paid -> free),
-      // but can never grant themselves premium — only an admin, or the
-      // purchase-verifying backend (via a service account, bypassing rules),
-      // can do that.
-      function isSelfExpiry() {
-        return isOwner(uid) &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tier', 'premiumExpiresAt']) &&
-          resource.data.tier == 'paid' &&
-          request.resource.data.tier == 'free';
-      }
+      // Profiles are created by the `economy` function (action: init-profile)
+      // so a client can never invent its own coins/tier/referral code.
+      allow create: if isAdmin();
 
-      // Lets an account whose referralCode is missing (a legacy profile from
-      // before referral codes existed, or any write that landed without one)
-      // fill it in once — never lets an existing code be changed/reassigned.
-      function isReferralCodeBackfill() {
-        return isOwner(uid) &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['referralCode']) &&
-          // A legacy doc from before this field existed doesn't have the key
-          // at all — accessing a missing map key directly (rather than
-          // guarding with `in` first) errors out the whole rule and denies
-          // the write, so both "missing" and "empty string" must be handled.
-          (!('referralCode' in resource.data) || resource.data.referralCode == '') &&
-          request.resource.data.referralCode is string &&
-          request.resource.data.referralCode != '';
-      }
-
-      // Lets an account whose real profile was never written (a phantom doc
-      // created only by updateLastActivity()/updateFcmToken()'s upsert, with
-      // no real email) get its full profile backfilled in one write — but
-      // only into safe starting values, never into premium/blocked/etc.
-      function isProfileBackfill() {
-        return isOwner(uid) &&
-          (!('email' in resource.data) || resource.data.email == '') &&
-          request.resource.data.email is string &&
-          request.resource.data.email != '' &&
-          request.resource.data.tier == 'free' &&
-          request.resource.data.isBlocked == false;
-      }
-
-      // Users may update their own profile, but not grant themselves premium,
-      // unblock themselves, or forge their own referral identity.
-      allow update: if isAdmin() || isSelfExpiry() || isReferralCodeBackfill() || isProfileBackfill() || (
+      // Owner may change ONLY these harmless fields, with basic validation.
+      // Anything else (coins, tier, premiumExpiresAt, isBlocked, referral*,
+      // dailyAdsWatched, loginStreak, lastDailyReset, ...) is rejected.
+      allow update: if isAdmin() || (
         isOwner(uid) &&
-        !request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['tier', 'isBlocked', 'referralCode', 'uid', 'email'])
-      ) || (
-        isLegitReferralCredit(uid) &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins', 'referralCount'])
+        changedKeys().hasOnly(['displayName', 'photoUrl', 'gender', 'fcmToken', 'lastActivity']) &&
+        (!('displayName' in changedKeys()) ||
+          (request.resource.data.displayName is string &&
+           request.resource.data.displayName.size() <= 60)) &&
+        (!('photoUrl' in changedKeys()) ||
+          (request.resource.data.photoUrl is string &&
+           request.resource.data.photoUrl.size() <= 500 &&
+           request.resource.data.photoUrl.matches('https://.*'))) &&
+        (!('gender' in changedKeys()) ||
+          request.resource.data.gender in ['male', 'female', 'unisex']) &&
+        (!('fcmToken' in changedKeys()) ||
+          request.resource.data.fcmToken == null ||
+          (request.resource.data.fcmToken is string &&
+           request.resource.data.fcmToken.size() <= 400)) &&
+        (!('lastActivity' in changedKeys()) ||
+          request.resource.data.lastActivity == request.time)
       );
 
       allow delete: if isAdmin();
 
       match /history/{historyId} {
+        // History is written by the generate-image function (server-side),
+        // so a client can neither forge nor tamper with it.
         allow read: if isOwner(uid) || isAdmin();
-        allow create: if isOwner(uid);
-        allow update, delete: if isAdmin();
+        allow write: if isAdmin();
       }
 
       match /notifications/{notificationId} {
         allow read: if isOwner(uid) || isAdmin();
-        // A referred user is allowed to drop a "you earned a referral bonus"
-        // notification into their inviter's inbox at signup/redeem time.
-        allow create: if isOwner(uid) || isAdmin() || isLegitReferralCredit(uid);
-        allow update: if isOwner(uid) || isAdmin();
+        // Only the server (referral bonus etc.) or an admin creates notifications.
+        allow create: if isAdmin();
+        // The owner can only mark one as read.
+        allow update: if isAdmin() ||
+          (isOwner(uid) && changedKeys().hasOnly(['isRead']));
         allow delete: if isAdmin();
       }
     }
@@ -140,14 +123,36 @@ service cloud.firestore {
     }
 
     match /support_tickets/{uid} {
-      allow read, create, update: if isOwner(uid) || isAdmin();
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isAdmin() || (
+        isOwner(uid) &&
+        request.resource.data.userId == uid &&
+        request.resource.data.status == 'open'
+      );
+      allow update: if isAdmin() || (
+        isOwner(uid) &&
+        changedKeys().hasOnly(['lastMessage', 'lastTimestamp', 'userId', 'status']) &&
+        request.resource.data.userId == uid &&
+        request.resource.data.status == 'open'
+      );
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read, create: if isOwner(uid) || isAdmin();
+        allow read: if isOwner(uid) || isAdmin();
+        // A user can only post as themselves, never as an admin.
+        allow create: if isAdmin() || (
+          isOwner(uid) &&
+          request.resource.data.senderId == uid &&
+          request.resource.data.isAdmin == false &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() <= 2000
+        );
         allow update, delete: if isAdmin();
       }
     }
+
+    // adRewards, generationJobs, purchaseTokens, subscriptions, ... are
+    // server-only and fall through to the default deny below.
 
     // Deny everything else by default.
     match /{document=**} {

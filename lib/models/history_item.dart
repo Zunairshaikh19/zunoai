@@ -10,6 +10,9 @@ class HistoryItem {
   final HistoryStatus status;
   final String? errorMessage;
 
+  /// True once the watermark was removed for this image (paid for with coins).
+  final bool watermarkUnlocked;
+
   HistoryItem({
     required this.id,
     this.outputUrl,
@@ -17,6 +20,7 @@ class HistoryItem {
     required this.timestamp,
     this.status = HistoryStatus.success,
     this.errorMessage,
+    this.watermarkUnlocked = false,
   });
 
   factory HistoryItem.fromMap(Map<String, dynamic> data, String id) {
@@ -39,6 +43,7 @@ class HistoryItem {
       timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
       status: status,
       errorMessage: data['errorMessage'],
+      watermarkUnlocked: data['watermarkUnlocked'] == true,
     );
   }
 

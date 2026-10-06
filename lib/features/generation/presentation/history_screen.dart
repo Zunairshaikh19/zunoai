@@ -9,7 +9,6 @@ import 'package:gal/gal.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../providers/user_provider.dart';
 import '../../../models/history_item.dart';
-import '../../../models/user_model.dart';
 import '../../../providers/root_index_provider.dart';
 import '../../../core/utils/watermark.dart';
 import '../../../core/utils/app_snackbar.dart';
@@ -135,7 +134,7 @@ class _HistoryCard extends StatelessWidget {
           : () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => _MasterpiecePreviewScreen(imageUrl: item.outputUrl!),
+                  builder: (context) => _MasterpiecePreviewScreen(imageUrl: item.outputUrl!, watermarkUnlocked: item.watermarkUnlocked),
                 ),
               ),
       child: Column(
@@ -195,7 +194,8 @@ class _HistoryCard extends StatelessWidget {
 /// just-generated result screen, not to browsing old history).
 class _MasterpiecePreviewScreen extends ConsumerStatefulWidget {
   final String imageUrl;
-  const _MasterpiecePreviewScreen({required this.imageUrl});
+  final bool watermarkUnlocked;
+  const _MasterpiecePreviewScreen({required this.imageUrl, this.watermarkUnlocked = false});
 
   @override
   ConsumerState<_MasterpiecePreviewScreen> createState() => _MasterpiecePreviewScreenState();
@@ -215,7 +215,7 @@ class _MasterpiecePreviewScreenState extends ConsumerState<_MasterpiecePreviewSc
         throw "Download failed (${response.statusCode})";
       }
 
-      final isPremium = ref.read(userProvider).value?.tier == UserTier.paid;
+      final isPremium = (ref.read(userProvider).value?.isPremium ?? false) || widget.watermarkUnlocked;
       final bytes = isPremium ? response.bodyBytes : await applyWatermark(response.bodyBytes);
       final extension = isPremium ? 'jpg' : 'png';
 

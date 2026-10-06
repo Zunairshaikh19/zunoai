@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../providers/user_provider.dart';
-import '../../../providers/economy_provider.dart';
-import '../../../models/economy_config.dart';
 import '../../../core/utils/app_snackbar.dart';
 
 import 'widgets/social_button.dart';
@@ -24,14 +22,22 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   Future<void> _signUp() async {
     setState(() => _isLoading = true);
     try {
-      final config = ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
-      await ref.read(firebaseServiceProvider).signUp(
+      final service = ref.read(firebaseServiceProvider);
+      await service.signUp(
         _emailController.text.trim(),
         _passwordController.text.trim(),
-        referralCode: _referralController.text.trim(),
-        signupBonus: config.signupBonus,
-        referralReward: config.referralReward,
+        referralCode: _referralController.text.trim().toUpperCase(),
       );
+      if (mounted) {
+        final applied = service.lastSignupReferralApplied;
+        if (applied == true) {
+          AppSnackBar.showSuccess(context, "Referral applied! Check your email to verify your account.");
+        } else if (applied == false) {
+          AppSnackBar.showInfo(context, "Account created, but the referral code wasn't valid. Check your email to verify your account.");
+        } else {
+          AppSnackBar.showInfo(context, "Account created! Check your email to verify your account.");
+        }
+      }
       // Signup screen sits on top of Login in the stack, so a single pop only
       // reveals Login again instead of the real (now authenticated) dashboard
       // underneath. Unwind the whole auth flow in one shot instead.
@@ -124,11 +130,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                 icon: Icons.g_mobiledata,
                 onPressed: () async {
                   try {
-                    final config = ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
-                    await ref.read(firebaseServiceProvider).signInWithGoogle(
-                          signupBonus: config.signupBonus,
-                          referralReward: config.referralReward,
-                        );
+                    await ref.read(firebaseServiceProvider).signInWithGoogle();
                     if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
                   } catch (e) {
                     if (context.mounted) {

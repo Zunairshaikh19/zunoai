@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -6,7 +5,7 @@ import '../../features/monetization/presentation/paywall_screen.dart';
 import '../../models/economy_config.dart';
 import '../../providers/economy_provider.dart';
 import '../../providers/user_provider.dart';
-import '../../services/ad_service.dart';
+import '../utils/rewarded_flow.dart';
 import '../theme/app_colors.dart';
 import '../utils/app_snackbar.dart';
 
@@ -50,33 +49,28 @@ class _InsufficientCoinsModalState extends ConsumerState<_InsufficientCoinsModal
     setState(() => _watchingAd = true);
 
     final config = ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
-    final completer = Completer<bool>();
-
-    AdService().showRewarded(
-      onReward: (_) async {
-        await ref.read(userProvider.notifier).addCoins(config.adRewardAmount);
-        await ref.read(userProvider.notifier).incrementAdCount();
-        if (!completer.isCompleted) completer.complete(true);
-      },
-      onFailed: () {
-        if (!completer.isCompleted) completer.complete(false);
-      },
-    );
-
-    final earned = await completer.future;
+    final result = await runRewardedAd(ref);
     if (!mounted) return;
     setState(() => _watchingAd = false);
 
-    if (!earned) {
-      AppSnackBar.showError(context, "Ad not available right now, try again in a bit.");
-      return;
-    }
-
-    final balance = ref.read(userProvider).value?.coins ?? 0;
-    if (balance >= widget.cost) {
-      if (mounted) Navigator.pop(context, true);
-    } else {
-      AppSnackBar.showSuccess(context, "+${config.adRewardAmount} coins added!");
+    switch (result) {
+      case AdFlowResult.credited:
+        final balance = ref.read(userProvider).value?.coins ?? 0;
+        if (balance >= widget.cost) {
+          Navigator.pop(context, true);
+        } else {
+          AppSnackBar.showSuccess(context, "+${config.adRewardAmount} coins added!");
+        }
+      case AdFlowResult.pending:
+        AppSnackBar.showInfo(context, "Verifying your reward... coins will appear shortly.");
+      case AdFlowResult.dismissed:
+        AppSnackBar.showInfo(context, "Watch the full ad to earn coins.");
+      case AdFlowResult.unavailable:
+        AppSnackBar.showError(context, "Ad not available right now, try again in a bit.");
+      case AdFlowResult.limitReached:
+        AppSnackBar.showInfo(context, "Daily ad limit reached. Try again tomorrow or go Premium.");
+      case AdFlowResult.notSignedIn:
+        AppSnackBar.showInfo(context, "Please sign in first.");
     }
   }
 
@@ -87,7 +81,11 @@ class _InsufficientCoinsModalState extends ConsumerState<_InsufficientCoinsModal
 
   @override
   Widget build(BuildContext context) {
-    final balance = ref.watch(userProvider).value?.coins ?? 0;
+    final user = ref.watch(userProvider).value;
+    final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
+    final balance = user?.coins ?? 0;
+    final adLimit = (user?.isPremium ?? false) ? config.premiumAdLimitPerDay : config.freeAdLimitPerDay;
+    final canWatchAd = user != null && user.dailyAdsWatched < adLimit;
 
     return Container(
       padding: EdgeInsets.only(
@@ -126,12 +124,12 @@ class _InsufficientCoinsModalState extends ConsumerState<_InsufficientCoinsModal
           ),
           const SizedBox(height: 10),
           Text(
-            "${widget.actionLabel} costs ${widget.cost} coins — you have $balance. Watch a quick ad for free coins, or go premium and skip this forever.",
+            "${widget.actionLabel} costs ${widget.cost} coins — you have $balance. ${canWatchAd ? 'Watch a quick ad for free coins, or go' : 'Come back tomorrow for free coins, or go'} Premium for a bigger daily allowance.",
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white60, fontSize: 14, height: 1.4),
           ),
           const SizedBox(height: 28),
-          SizedBox(
+          if (canWatchAd) SizedBox(
             width: double.infinity,
             height: 56,
             child: ElevatedButton.icon(

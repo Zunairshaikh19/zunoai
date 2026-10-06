@@ -9,6 +9,7 @@ import '../../../providers/user_provider.dart';
 import '../../../providers/economy_provider.dart';
 import '../../../providers/saved_prompts_provider.dart';
 import '../../../core/utils/app_snackbar.dart';
+import '../../../services/api_client.dart';
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../legal/presentation/privacy_policy_screen.dart';
 import '../../generation/presentation/history_screen.dart';
@@ -557,15 +558,45 @@ class ProfileScreen extends ConsumerWidget {
         confirmLabel: "Claim Bonus",
         onConfirm: () async {
           try {
-            await ref.read(firebaseServiceProvider).redeemReferralCode(uid, controller.text.trim().toUpperCase());
+            final code = controller.text.trim().toUpperCase();
+            if (code.isEmpty) return;
+            final coins = await ref.read(firebaseServiceProvider).redeemReferralCode(code);
             if (context.mounted) {
               Navigator.pop(context);
-              AppSnackBar.showSuccess(context, "Bonus claimed successfully!");
+              AppSnackBar.showSuccess(context, "Bonus claimed! +$coins coins");
             }
-          } catch (e) {
-            if (context.mounted) {
-              AppSnackBar.showError(context, "Error: $e");
-            }
+          } on ApiException catch (e) {
+            if (context.mounted) AppSnackBar.showError(context, e.message);
+          } catch (_) {
+            if (context.mounted) AppSnackBar.showError(context, "Couldn't redeem the code. Please try again.");
+          }
+        },
+      ),
+    );
+  }
+
+  void _confirmDeleteAccount(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => _ZunoDialog(
+        icon: Icons.delete_forever,
+        title: "Delete account?",
+        content: const Text(
+          "This permanently deletes your account, your creations, your coins and any Premium benefits tied to it. "
+          "An active Google Play subscription is NOT cancelled automatically — cancel it in Google Play first. This cannot be undone.",
+          style: TextStyle(color: Colors.white70, height: 1.4),
+        ),
+        cancelLabel: "Cancel",
+        confirmLabel: "Delete Forever",
+        onConfirm: () async {
+          final service = ref.read(firebaseServiceProvider);
+          try {
+            await service.deleteAccount();
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
+          } on ApiException catch (e) {
+            if (context.mounted) AppSnackBar.showError(context, e.message);
+          } catch (_) {
+            if (context.mounted) AppSnackBar.showError(context, "Couldn't delete the account. Please try again.");
           }
         },
       ),
@@ -603,10 +634,17 @@ class ProfileScreen extends ConsumerWidget {
             title: "Logout",
             iconColor: Colors.redAccent,
             textColor: Colors.redAccent,
-            isLast: true,
             onTap: () async {
               await ref.read(firebaseServiceProvider).signOut();
             },
+          ),
+          _buildSettingsTile(
+            icon: FontAwesomeIcons.userXmark,
+            title: "Delete Account",
+            iconColor: Colors.redAccent,
+            textColor: Colors.redAccent,
+            isLast: true,
+            onTap: () => _confirmDeleteAccount(context, ref),
           ),
         ],
       ),

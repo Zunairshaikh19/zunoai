@@ -1,0 +1,16 @@
+{
+  "_comment": "Seed for Firestore document settings/economy. Image cost $0.04 = 40 coins ($0.001/coin). Premium monthly $9.99, yearly $79.99 -> ~80% net margin after the 15% Google Play fee. Keep identical to DEFAULT_ECONOMY in supabase/functions/_shared/lib.ts and EconomyConfig in lib/models/economy_config.dart.",
+  "signupBonus": 40,
+  "referralReward": 20,
+  "referralCap": 10,
+  "generationCost": 40,
+  "adRewardAmount": 10,
+  "dailyBonusFree": 5,
+  "dailyBonusPremium": 52,
+  "dailyBonusPremiumYearly": 33,
+  "freeAdLimitPerDay": 3,
+  "premiumAdLimitPerDay": 0,
+  "watermarkRemovalCost": 20,
+  "maxGenerationsPerDay": 60,
+  "streakRewards": [2, 2, 3, 3, 4, 5, 10]
+}

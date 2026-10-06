@@ -6,8 +6,14 @@ class UserModel {
   final String uid;
   final String email;
   final int coins;
+
+  /// Effective tier: a `paid` profile whose `premiumExpiresAt` is in the past
+  /// is shown as `free` immediately (the server also downgrades it).
   final UserTier tier;
   final DateTime? premiumExpiresAt;
+
+  /// 'monthly' | 'yearly' | null
+  final String? premiumPlan;
   final String referralCode;
   final String? referredBy;
   final DateTime lastDailyReset;
@@ -34,9 +40,10 @@ class UserModel {
     required this.email,
     this.displayName,
     this.photoUrl,
-    this.coins = 40,
+    this.coins = 0,
     this.tier = UserTier.free,
     this.premiumExpiresAt,
+    this.premiumPlan,
     required this.referralCode,
     this.referredBy,
     required this.lastDailyReset,
@@ -50,65 +57,45 @@ class UserModel {
     this.gender,
   });
 
+  bool get isPremium => tier == UserTier.paid;
+
+  /// Firestore may hand back int or double (e.g. after an admin edit) — never
+  /// crash on either.
+  static int _int(dynamic v, [int fallback = 0]) => v is num ? v.toInt() : fallback;
+
+  static DateTime? _date(dynamic v) => v is Timestamp ? v.toDate() : null;
+
   factory UserModel.fromMap(Map<String, dynamic> data, String uid) {
+    final expires = _date(data['premiumExpiresAt']);
+    final rawPaid = data['tier'] == 'paid';
+    final stillPaid = rawPaid && expires != null && expires.isAfter(DateTime.now());
+
     return UserModel(
       uid: uid,
       email: data['email'] ?? '',
       displayName: data['displayName'],
       photoUrl: data['photoUrl'],
-      coins: data['coins'] ?? 40,
-      tier: data['tier'] == 'paid' ? UserTier.paid : UserTier.free,
-      premiumExpiresAt: (data['premiumExpiresAt'] as Timestamp?)?.toDate(),
+      coins: _int(data['coins']),
+      tier: stillPaid ? UserTier.paid : UserTier.free,
+      premiumExpiresAt: expires,
+      premiumPlan: data['premiumPlan'] as String?,
       referralCode: data['referralCode'] ?? '',
       referredBy: data['referredBy'],
-      lastDailyReset: (data['lastDailyReset'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      dailyAdsWatched: data['dailyAdsWatched'] ?? 0,
-      referralCount: data['referralCount'] ?? 0,
+      lastDailyReset: _date(data['lastDailyReset']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+      dailyAdsWatched: _int(data['dailyAdsWatched']),
+      referralCount: _int(data['referralCount']),
       isBlocked: data['isBlocked'] ?? false,
-      lastActivity: (data['lastActivity'] as Timestamp?)?.toDate(),
+      lastActivity: _date(data['lastActivity']),
       fcmToken: data['fcmToken'],
-      loginStreak: data['loginStreak'] ?? 0,
-      lastStreakClaim: (data['lastStreakClaim'] as Timestamp?)?.toDate(),
+      loginStreak: _int(data['loginStreak']),
+      lastStreakClaim: _date(data['lastStreakClaim']),
       gender: data['gender'],
     );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'email': email,
-      'displayName': displayName,
-      'photoUrl': photoUrl,
-      'coins': coins,
-      'tier': tier == UserTier.paid ? 'paid' : 'free',
-      'premiumExpiresAt': premiumExpiresAt != null ? Timestamp.fromDate(premiumExpiresAt!) : null,
-      'referralCode': referralCode,
-      'referredBy': referredBy,
-      'lastDailyReset': Timestamp.fromDate(lastDailyReset),
-      'dailyAdsWatched': dailyAdsWatched,
-      'referralCount': referralCount,
-      'isBlocked': isBlocked,
-      'lastActivity': lastActivity != null ? Timestamp.fromDate(lastActivity!) : FieldValue.serverTimestamp(),
-      'fcmToken': fcmToken,
-      'loginStreak': loginStreak,
-      'lastStreakClaim': lastStreakClaim != null ? Timestamp.fromDate(lastStreakClaim!) : null,
-      'gender': gender,
-    };
   }
 
   UserModel copyWith({
     String? displayName,
     String? photoUrl,
-    int? coins,
-    UserTier? tier,
-    DateTime? premiumExpiresAt,
-    int? dailyAdsWatched,
-    DateTime? lastDailyReset,
-    int? referralCount,
-    bool? isBlocked,
-    DateTime? lastActivity,
-    String? fcmToken,
-    int? loginStreak,
-    DateTime? lastStreakClaim,
     String? gender,
   }) {
     return UserModel(
@@ -116,19 +103,20 @@ class UserModel {
       email: email,
       displayName: displayName ?? this.displayName,
       photoUrl: photoUrl ?? this.photoUrl,
-      coins: coins ?? this.coins,
-      tier: tier ?? this.tier,
-      premiumExpiresAt: premiumExpiresAt ?? this.premiumExpiresAt,
+      coins: coins,
+      tier: tier,
+      premiumExpiresAt: premiumExpiresAt,
+      premiumPlan: premiumPlan,
       referralCode: referralCode,
       referredBy: referredBy,
-      lastDailyReset: lastDailyReset ?? this.lastDailyReset,
-      dailyAdsWatched: dailyAdsWatched ?? this.dailyAdsWatched,
-      referralCount: referralCount ?? this.referralCount,
-      isBlocked: isBlocked ?? this.isBlocked,
-      lastActivity: lastActivity ?? this.lastActivity,
-      fcmToken: fcmToken ?? this.fcmToken,
-      loginStreak: loginStreak ?? this.loginStreak,
-      lastStreakClaim: lastStreakClaim ?? this.lastStreakClaim,
+      lastDailyReset: lastDailyReset,
+      dailyAdsWatched: dailyAdsWatched,
+      referralCount: referralCount,
+      isBlocked: isBlocked,
+      lastActivity: lastActivity,
+      fcmToken: fcmToken,
+      loginStreak: loginStreak,
+      lastStreakClaim: lastStreakClaim,
       gender: gender ?? this.gender,
     );
   }

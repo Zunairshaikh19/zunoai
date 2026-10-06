@@ -5,11 +5,10 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../providers/user_provider.dart';
 import '../../../providers/economy_provider.dart';
-import '../../../services/ad_service.dart';
+import '../../../core/utils/rewarded_flow.dart';
 import '../../../models/user_model.dart';
 import '../../../models/economy_config.dart';
 import '../../../core/utils/app_snackbar.dart';
-import '../../../services/analytics_service.dart';
 import '../../../core/widgets/zuno_loader.dart';
 import '../../../core/widgets/zuno_error_view.dart';
 import '../../profile/presentation/profile_screen.dart';
@@ -32,9 +31,9 @@ class CoinStoreScreen extends ConsumerWidget {
         data: (user) {
           if (user == null) return const Center(child: Text("Please log in"));
 
-          final adLimit = user.tier == UserTier.paid ? config.premiumAdLimitPerDay : config.freeAdLimitPerDay;
+          final adLimit = user.isPremium ? config.premiumAdLimitPerDay : config.freeAdLimitPerDay;
           final canWatchAd = user.dailyAdsWatched < adLimit;
-          final dailyBonus = user.tier == UserTier.paid ? config.dailyBonusPremium : config.dailyBonusFree;
+          final dailyBonus = user.isPremium ? config.premiumDailyFor(user.premiumPlan) : config.dailyBonusFree;
 
           return SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -178,7 +177,7 @@ class CoinStoreScreen extends ConsumerWidget {
                 const Text("Daily ad limit", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
                 const SizedBox(height: 2),
                 Text(
-                  canWatch ? "$remaining more today · get $rewardAmount coins" : "Come back tomorrow for more",
+                  canWatch ? "$remaining more today · get $rewardAmount coins" : (limit == 0 ? "Premium members earn coins daily instead" : "Come back tomorrow for more"),
                   style: const TextStyle(color: Colors.white38, fontSize: 11.5),
                 ),
               ],
@@ -267,7 +266,7 @@ class CoinStoreScreen extends ConsumerWidget {
                 children: [
                   Text("Zuno AI Premium", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: Colors.white)),
                   SizedBox(height: 3),
-                  Text("Unlimited access & Pro features", style: TextStyle(fontSize: 12, color: Colors.white38)),
+                  Text("Bigger daily coins, no ads & Pro styles", style: TextStyle(fontSize: 12, color: Colors.white38)),
                 ],
               ),
             ),
@@ -278,24 +277,22 @@ class CoinStoreScreen extends ConsumerWidget {
     );
   }
 
-  void _showAd(BuildContext context, WidgetRef ref, int rewardAmount) {
-    AdService().showRewarded(
-      onReward: (reward) {
-        ref.read(userProvider.notifier).addCoins(rewardAmount).then((_) {
-          ref.read(userProvider.notifier).incrementAdCount();
-        });
-
-        AnalyticsService().logRewardedAdWatched();
-
-        if (context.mounted) {
-          AppSnackBar.showSuccess(context, "Coins added successfully!");
-        }
-      },
-      onFailed: () {
-        if (context.mounted) {
-          AppSnackBar.showError(context, "Ad failed to load. Please try again.");
-        }
-      },
-    );
+  Future<void> _showAd(BuildContext context, WidgetRef ref, int rewardAmount) async {
+    final result = await runRewardedAd(ref);
+    if (!context.mounted) return;
+    switch (result) {
+      case AdFlowResult.credited:
+        AppSnackBar.showSuccess(context, "+$rewardAmount coins added!");
+      case AdFlowResult.pending:
+        AppSnackBar.showInfo(context, "Verifying your reward... coins will appear shortly.");
+      case AdFlowResult.dismissed:
+        AppSnackBar.showInfo(context, "Watch the full ad to earn coins.");
+      case AdFlowResult.unavailable:
+        AppSnackBar.showError(context, "No ad available right now. Please try again in a bit.");
+      case AdFlowResult.limitReached:
+        AppSnackBar.showInfo(context, "Daily ad limit reached. Come back tomorrow!");
+      case AdFlowResult.notSignedIn:
+        AppSnackBar.showInfo(context, "Please sign in first.");
+    }
   }
 }

@@ -9,7 +9,7 @@ import '../../../models/image_prompt.dart';
 import '../../../models/economy_config.dart';
 import '../../../providers/user_provider.dart';
 import '../../../providers/economy_provider.dart';
-import '../../../models/history_item.dart';
+import '../../../services/api_client.dart';
 import '../../../core/theme/app_colors.dart';
 import 'package:http/http.dart' as http;
 import 'package:gal/gal.dart';
@@ -17,7 +17,6 @@ import '../../../core/utils/app_snackbar.dart';
 import '../../../core/utils/watermark.dart';
 import '../../../services/analytics_service.dart';
 import '../../../services/ad_service.dart';
-import '../../../models/user_model.dart';
 import '../../../providers/root_index_provider.dart';
 import '../../../core/widgets/zuno_watermark_badge.dart';
 import '../../../core/widgets/insufficient_coins_sheet.dart';
@@ -33,7 +32,7 @@ class GenerationState {
   final String? resultUrl;
   final String? errorMessage;
   final bool watermarkRemoved;
-  final bool hasClaimedShareReward;
+  final String? historyId;
   final bool isUnlockingWatermark;
 
   const GenerationState({
@@ -45,7 +44,7 @@ class GenerationState {
     this.resultUrl,
     this.errorMessage,
     this.watermarkRemoved = false,
-    this.hasClaimedShareReward = false,
+    this.historyId,
     this.isUnlockingWatermark = false,
   });
 
@@ -61,7 +60,7 @@ class GenerationState {
     bool clearImage = false,
     bool clearImage2 = false,
     bool? watermarkRemoved,
-    bool? hasClaimedShareReward,
+    String? historyId,
     bool? isUnlockingWatermark,
   }) {
     return GenerationState(
@@ -73,7 +72,7 @@ class GenerationState {
       resultUrl: clearResult ? null : (resultUrl ?? this.resultUrl),
       errorMessage: errorMessage,
       watermarkRemoved: clearResult ? false : (watermarkRemoved ?? this.watermarkRemoved),
-      hasClaimedShareReward: clearResult ? false : (hasClaimedShareReward ?? this.hasClaimedShareReward),
+      historyId: clearResult ? null : (historyId ?? this.historyId),
       isUnlockingWatermark: isUnlockingWatermark ?? this.isUnlockingWatermark,
     );
   }
@@ -123,55 +122,41 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
     if (user.coins < config.generationCost) {
       state = state.copyWith(
         isGenerating: false,
-        errorMessage: "Insufficient coins. You need at least ${config.generationCost} coins.",
+        errorMessage: "Not enough coins. You need ${config.generationCost} coins for one image.",
       );
+      return;
+    }
+    if (prompt.isPremium && !user.isPremium) {
+      state = state.copyWith(isGenerating: false, errorMessage: "This is a Premium style. Upgrade to use it.");
       return;
     }
 
     try {
-      final finalPrompt = prompt.hiddenPrompt.trim().isEmpty 
-          ? prompt.category 
-          : prompt.hiddenPrompt;
-
       AnalyticsService().logGenerationStarted(category: prompt.category);
 
+      // The server picks the real prompt text by id, charges coins, refunds on
+      // failure and records the history entry itself.
       final result = await _ref.read(firebaseServiceProvider).generateImageSecurely(
-        prompt: finalPrompt,
-        referenceImage: image,
-        referenceImage2: needsSecondImage ? state.referenceImage2 : null,
-        templateImageUrl: prompt.imageUrl,
+            promptId: prompt.id,
+            referenceImage: image,
+            referenceImage2: needsSecondImage ? state.referenceImage2 : null,
+          );
+
+      AnalyticsService().logGenerationSuccess(category: prompt.category);
+      state = state.copyWith(
+        isGenerating: false,
+        resultUrl: result.imageUrl,
+        historyId: result.historyId,
+        watermarkRemoved: user.isPremium,
       );
-
-      if (result != null && result.isNotEmpty) {
-        final historyItem = HistoryItem(
-          id: "", 
-          outputUrl: result,
-          promptCategory: prompt.category,
-          timestamp: DateTime.now(),
-          status: HistoryStatus.success,
-        );
-        await _ref.read(firebaseServiceProvider).saveToHistory(user.uid, historyItem);
-
-        AnalyticsService().logGenerationSuccess(category: prompt.category);
-
-        state = state.copyWith(
-          isGenerating: false,
-          resultUrl: result,
-          watermarkRemoved: user.tier == UserTier.paid,
-          hasClaimedShareReward: false,
-        );
-      } else {
-        AnalyticsService().logGenerationFailed(category: prompt.category, error: "Empty or null URL");
-        state = state.copyWith(
-          isGenerating: false,
-          errorMessage: "Generation failed. Please try again.",
-        );
-      }
+    } on ApiException catch (e) {
+      AnalyticsService().logGenerationFailed(category: prompt.category, error: e.code);
+      state = state.copyWith(isGenerating: false, errorMessage: e.message);
     } catch (e) {
       AnalyticsService().logGenerationFailed(category: prompt.category, error: e.toString());
       state = state.copyWith(
         isGenerating: false,
-        errorMessage: "Generation error: $e",
+        errorMessage: "Something went wrong. Your coins were not charged. Please try again.",
       );
     }
   }
@@ -179,11 +164,9 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
   /// Saves the result to the device's photo gallery (not a share-sheet hop —
   /// `Share.shareXFiles` only hands the file to whatever app the user picks
   /// next, which several apps/actions don't turn into an actual saved photo).
-  /// Returns the bonus coins earned for this (0 if already claimed for this
-  /// generation), so the caller can show it in a snackbar.
-  Future<int> downloadAndShareImage() async {
+  Future<bool> downloadAndShareImage() async {
     final url = state.resultUrl;
-    if (url == null || url.isEmpty) return 0;
+    if (url == null || url.isEmpty) return false;
 
     state = state.copyWith(isDownloading: true);
     try {
@@ -192,49 +175,50 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
             onTimeout: () => throw "Download timed out. Please try again.",
           );
       if (response.statusCode == 200) {
-        // A free-tier result stays watermarked in the actual saved file too —
-        // only the preview would be trivial to bypass otherwise.
+        // A free-tier result stays watermarked in the actual saved file too.
         final bytes = state.watermarkRemoved ? response.bodyBytes : await applyWatermark(response.bodyBytes);
         final extension = state.watermarkRemoved ? 'jpg' : 'png';
 
         await Gal.putImageBytes(bytes, name: 'ZunoAI_${DateTime.now().millisecondsSinceEpoch}.$extension');
         state = state.copyWith(isDownloading: false);
-
-        if (!state.hasClaimedShareReward) {
-          final config = _ref.read(economyConfigProvider).valueOrNull ?? const EconomyConfig();
-          await _ref.read(userProvider.notifier).addCoins(config.shareUnlockReward);
-          state = state.copyWith(hasClaimedShareReward: true);
-          return config.shareUnlockReward;
-        }
-        return 0;
-      } else {
-        state = state.copyWith(
-          isDownloading: false,
-          errorMessage: "Download failed (${response.statusCode})",
-        );
-        return 0;
+        return true;
       }
+      state = state.copyWith(isDownloading: false, errorMessage: "Download failed (${response.statusCode})");
+      return false;
     } on GalException catch (e) {
-      state = state.copyWith(
-        isDownloading: false,
-        errorMessage: "Couldn't save to gallery: ${e.type.message}",
-      );
-      return 0;
+      state = state.copyWith(isDownloading: false, errorMessage: "Couldn't save to gallery: ${e.type.message}");
+      return false;
     } catch (e) {
-      state = state.copyWith(
-        isDownloading: false,
-        errorMessage: "Download error: $e",
-      );
-      return 0;
+      state = state.copyWith(isDownloading: false, errorMessage: "Download error: $e");
+      return false;
     }
   }
 
-  Future<bool> unlockWatermark(int cost) async {
+  /// Removes the watermark on the server (it charges the coins). Returns
+  /// `true` on success, `false` if the user lacks coins (caller shows the
+  /// "earn coins" sheet) and sets [errorMessage] for any other failure.
+  Future<bool> unlockWatermark() async {
     if (state.watermarkRemoved) return true;
+    final historyId = state.historyId;
+    if (historyId == null) {
+      state = state.copyWith(errorMessage: "Couldn't remove the watermark for this image.");
+      return false;
+    }
     state = state.copyWith(isUnlockingWatermark: true);
-    final spent = await _ref.read(userProvider.notifier).spendCoins(cost);
-    state = state.copyWith(isUnlockingWatermark: false, watermarkRemoved: spent ? true : state.watermarkRemoved);
-    return spent;
+    try {
+      await _ref.read(firebaseServiceProvider).unlockWatermark(historyId);
+      state = state.copyWith(isUnlockingWatermark: false, watermarkRemoved: true);
+      return true;
+    } on ApiException catch (e) {
+      state = state.copyWith(
+        isUnlockingWatermark: false,
+        errorMessage: e.isInsufficientCoins ? null : e.message,
+      );
+      return false;
+    } catch (_) {
+      state = state.copyWith(isUnlockingWatermark: false, errorMessage: "Something went wrong. Please try again.");
+      return false;
+    }
   }
 }
 
@@ -475,10 +459,10 @@ class _AiProgressIndicatorState extends State<_AiProgressIndicator> with SingleT
   Timer? _tipTimer;
 
   static const List<String> _tips = [
-    "Tip: You get 40 free coins every single day!",
+    "Tip: You get free coins every day just for opening the app!",
     "Tip: Clear reference photos produce higher-quality AI portraits.",
     "Tip: Explore saved prompt blueprints to discover new styles.",
-    "Tip: Upgrade to Zuno Premium for priority processing speed.",
+    "Tip: Premium gives you a bigger daily coin allowance.",
   ];
 
   static const List<Map<String, dynamic>> _phases = [
@@ -628,9 +612,7 @@ class _PromptCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            prompt.hiddenPrompt.isEmpty
-                ? "Experience the magic of AI based on this theme."
-                : prompt.hiddenPrompt,
+            "Experience the magic of AI based on this theme.",
             style: const TextStyle(color: Colors.white70, height: 1.5),
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
@@ -651,7 +633,7 @@ class _ResultView extends ConsumerWidget {
   // the highest-engagement moment in the app, and the standard placement for
   // this category of app. Premium stays completely ad-free.
   void _leaveResult(WidgetRef ref) {
-    final isPremium = ref.read(userProvider).value?.tier == UserTier.paid;
+    final isPremium = (ref.read(userProvider).value?.isPremium ?? false);
     final notifier = ref.read(generationNotifierProvider.notifier);
     if (isPremium) {
       notifier.resetResult();
@@ -664,7 +646,7 @@ class _ResultView extends ConsumerWidget {
   // entirely and drops the user straight on the dashboard, unlike the back
   // arrow which only steps back to re-generate with the same prompt.
   void _closeToDashboard(BuildContext context, WidgetRef ref) {
-    final isPremium = ref.read(userProvider).value?.tier == UserTier.paid;
+    final isPremium = (ref.read(userProvider).value?.isPremium ?? false);
     final notifier = ref.read(generationNotifierProvider.notifier);
 
     void goHome() {
@@ -750,7 +732,7 @@ class _ResultView extends ConsumerWidget {
                       ? null
                       : () async {
                           final notifier = ref.read(generationNotifierProvider.notifier);
-                          var unlocked = await notifier.unlockWatermark(config.watermarkRemovalCost);
+                          var unlocked = await notifier.unlockWatermark();
 
                           if (!unlocked && context.mounted) {
                             // Not enough coins — offer to watch an ad for more,
@@ -762,7 +744,7 @@ class _ResultView extends ConsumerWidget {
                               cost: config.watermarkRemovalCost,
                             );
                             if (gotCoins) {
-                              unlocked = await notifier.unlockWatermark(config.watermarkRemovalCost);
+                              unlocked = await notifier.unlockWatermark();
                             }
                           }
 
@@ -783,7 +765,7 @@ class _ResultView extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  prompt.hiddenPrompt.isNotEmpty ? prompt.hiddenPrompt : prompt.category,
+                  prompt.category,
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -809,16 +791,11 @@ class _ResultView extends ConsumerWidget {
                         onPressed: genState.isDownloading
                             ? null
                             : () async {
-                                final bonus = await ref
+                                final saved = await ref
                                     .read(generationNotifierProvider.notifier)
                                     .downloadAndShareImage();
-                                final hasError =
-                                    ref.read(generationNotifierProvider).errorMessage != null;
-                                if (context.mounted && !hasError) {
-                                  AppSnackBar.showSuccess(
-                                    context,
-                                    bonus > 0 ? "Saved to gallery! +$bonus coins" : "Saved to gallery!",
-                                  );
+                                if (context.mounted && saved) {
+                                  AppSnackBar.showSuccess(context, "Saved to gallery!");
                                 }
                               },
                         icon: genState.isDownloading

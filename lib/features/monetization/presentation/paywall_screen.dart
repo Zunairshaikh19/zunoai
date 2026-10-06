@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -9,15 +10,12 @@ import '../../../models/user_model.dart';
 import '../../../models/economy_config.dart';
 import '../../../providers/user_provider.dart';
 import '../../../providers/economy_provider.dart';
+import '../../../providers/purchase_provider.dart';
 import '../../../services/iap_service.dart';
-import '../../../services/analytics_service.dart';
 
 const String _kMonthlyProductId = 'zuno_premium_monthly';
-// Not wired to a live store product yet — create "zuno_premium_yearly" as a
-// yearly subscription in App Store Connect / Play Console (and teach the
-// confirm-purchase backend function that product id) to light this up. Until
-// then fetchProducts simply won't return it and the yearly option stays
-// hidden, so this never offers something that can't actually be bought.
+// Create both as subscriptions in Play Console (see PRODUCTION_CHECKLIST.md).
+// Prices: $9.99 / month and $79.99 / year (set in Play Console, not here).
 const String _kYearlyProductId = 'zuno_premium_yearly';
 
 class PaywallScreen extends ConsumerStatefulWidget {
@@ -29,6 +27,7 @@ class PaywallScreen extends ConsumerStatefulWidget {
 
 class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   bool _isProcessing = false;
+  bool _productsLoaded = false;
   ProductDetails? _monthlyProduct;
   ProductDetails? _yearlyProduct;
   String _selectedPlan = 'yearly'; // preferred once/if a yearly product exists
@@ -39,55 +38,45 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     // Already-premium users get the status view below (built straight from
     // userProvider) instead of the buy flow, so there's no need to spin up
     // the store connection and fetch product details for them.
-    final isAlreadyPremium = ref.read(userProvider).value?.tier == UserTier.paid;
+    final isAlreadyPremium = ref.read(userProvider).value?.isPremium ?? false;
     if (!isAlreadyPremium) {
       _initIap();
     }
   }
 
-  Future<void> _initIap() async {
-    final iap = IapService();
-    await iap.init(
-      onPurchaseSuccess: (purchaseDetails) async {
-        try {
-          final purchaseToken = purchaseDetails.verificationData.serverVerificationData;
-          await ref.read(firebaseServiceProvider).activatePremium(
-                productId: purchaseDetails.productID,
-                purchaseToken: purchaseToken.isNotEmpty ? purchaseToken : purchaseDetails.purchaseID ?? purchaseDetails.productID,
-              );
-          AnalyticsService().logPurchaseCompleted(
-            productId: purchaseDetails.productID,
-            value: purchaseDetails.productID == _kYearlyProductId ? 47.88 : 4.99,
-            currency: 'USD',
-          );
-          if (mounted) {
-            AppSnackBar.showSuccess(context, "Welcome to Zuno AI Premium!");
-            Navigator.pop(context);
-          }
-        } catch (e) {
-          if (mounted) {
-            AppSnackBar.showError(context, "Couldn't activate premium: $e");
-          }
-        }
-      },
-      onPurchaseError: (error) {
-        if (mounted) {
-          AppSnackBar.showError(context, "Purchase Error: $error");
-        }
-      },
-    );
+  StreamSubscription<PurchaseEvent>? _purchaseSub;
 
-    final products = await iap.fetchProducts({_kMonthlyProductId, _kYearlyProductId});
+  Future<void> _initIap() async {
+    // The PurchaseCoordinator (started at app launch) verifies purchases with
+    // the backend; this screen only reacts to its result.
+    _purchaseSub = ref.read(purchaseCoordinatorProvider).events.listen((event) {
+      if (!mounted) return;
+      setState(() => _isProcessing = false);
+      if (event.success) {
+        AppSnackBar.showSuccess(context, event.message);
+        Navigator.pop(context);
+      } else {
+        AppSnackBar.showError(context, event.message);
+      }
+    });
+
+    final products = await IapService().fetchProducts({_kMonthlyProductId, _kYearlyProductId});
     if (mounted) {
       setState(() {
+        _productsLoaded = true;
         for (final p in products) {
           if (p.id == _kMonthlyProductId) _monthlyProduct = p;
           if (p.id == _kYearlyProductId) _yearlyProduct = p;
         }
-        // Only default to "yearly" when it's actually purchasable.
         if (_yearlyProduct == null) _selectedPlan = 'monthly';
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _purchaseSub?.cancel();
+    super.dispose();
   }
 
   ProductDetails? get _activeProduct => _selectedPlan == 'yearly' ? _yearlyProduct : _monthlyProduct;
@@ -98,15 +87,20 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
       AppSnackBar.showInfo(context, "Store product details loading or unavailable.");
       return;
     }
+    if (ref.read(userProvider).value == null) {
+      AppSnackBar.showInfo(context, "Please sign in first.");
+      return;
+    }
     setState(() => _isProcessing = true);
     try {
-      await IapService().buyProduct(product);
+      final started = await IapService().buyProduct(product);
+      // The result (success/failure) arrives through the coordinator stream.
+      if (!started && mounted) setState(() => _isProcessing = false);
     } catch (e) {
       if (mounted) {
+        setState(() => _isProcessing = false);
         AppSnackBar.showError(context, "Transaction error: $e");
       }
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
@@ -114,9 +108,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     setState(() => _isProcessing = true);
     try {
       await IapService().restorePurchases();
-      if (mounted) {
-        AppSnackBar.showSuccess(context, "Purchases restored successfully!");
-      }
+      // Restored purchases are re-verified by the backend; a success/failure
+      // message is shown from the coordinator stream. Nothing to restore =>
+      // no event, so tell the user we checked.
+      if (mounted) AppSnackBar.showInfo(context, "Checking your purchases...");
     } catch (e) {
       if (mounted) {
         AppSnackBar.showError(context, "Restore failed: $e");
@@ -130,7 +125,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   Widget build(BuildContext context) {
     final user = ref.watch(userProvider).value;
     final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
-    final isPremium = user?.tier == UserTier.paid;
+    final isPremium = user?.isPremium ?? false;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -177,33 +172,24 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           ),
           const SizedBox(height: 18),
           const Text(
-            "Never get stopped\nmid-creation again",
+            "More images,\nno ads, no waiting",
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, height: 1.2, letterSpacing: -0.5),
           ),
           const SizedBox(height: 8),
           const Text(
-            "Go Premium to unlock everything below, instantly.",
+            "Premium gives you a bigger daily coin allowance every day.",
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white38, fontSize: 13),
           ),
           const SizedBox(height: 24),
-          _buildValueRow(FontAwesomeIcons.infinity, "Unlimited generations", "\$9.99 value"),
+          _buildValueRow(FontAwesomeIcons.coins, "${config.dailyBonusPremium} coins every day (monthly)", "~${(config.dailyBonusPremium * 30 / config.generationCost).floor()} images/mo"),
           const SizedBox(height: 9),
-          _buildValueRow(FontAwesomeIcons.boltLightning, "Priority processing speed", "\$4.99 value"),
+          _buildValueRow(FontAwesomeIcons.coins, "${config.dailyBonusPremiumYearly} coins every day (yearly)", "~${(config.dailyBonusPremiumYearly * 30 / config.generationCost).floor()} images/mo"),
           const SizedBox(height: 9),
-          _buildValueRow(FontAwesomeIcons.wandMagicSparkles, "Exclusive Pro styles, no ads", "\$4.99 value"),
-          const SizedBox(height: 12),
-          const Row(
-            children: [
-              Text("Total value", style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900)),
-              Spacer(),
-              Text(
-                "\$19.97",
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.white38, decoration: TextDecoration.lineThrough),
-              ),
-            ],
-          ),
+          _buildValueRow(FontAwesomeIcons.wandMagicSparkles, "Exclusive Pro styles", "Premium only"),
+          const SizedBox(height: 9),
+          _buildValueRow(FontAwesomeIcons.ban, "No ads, free watermark removal", "Included"),
           const SizedBox(height: 22),
           _buildPlanSelector(),
           const SizedBox(height: 20),
@@ -234,7 +220,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
             children: [
               Icon(Icons.check_circle_rounded, size: 13, color: AppColors.electricLime),
               SizedBox(width: 4),
-              Text("Cancel anytime", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              Text("Cancel anytime in Google Play", style: TextStyle(fontSize: 11, color: Colors.white38)),
               SizedBox(width: 14),
               Icon(Icons.lock_rounded, size: 13, color: AppColors.electricLime),
               SizedBox(width: 4),
@@ -254,7 +240,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
 
   String _ctaLabel() {
     final product = _activeProduct;
-    if (product == null) return "Continue";
+    if (product == null) return _productsLoaded ? "Store unavailable" : "Loading...";
     return "Start Premium — ${product.price}";
   }
 
@@ -313,9 +299,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         if (hasYearly) ...[
           _buildPlanCard(
             selected: _selectedPlan == 'yearly',
-            badge: "BEST VALUE · SAVE 20%",
+            badge: "BEST VALUE",
             title: "Yearly",
-            subtitle: _yearlyProduct!.price,
+            subtitle: "${_yearlyProduct!.price} / year",
             onTap: () => setState(() => _selectedPlan = 'yearly'),
           ),
           const SizedBox(height: 10),
@@ -323,7 +309,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         _buildPlanCard(
           selected: _selectedPlan == 'monthly' || !hasYearly,
           title: "Monthly",
-          subtitle: _monthlyProduct?.price ?? "\$4.99",
+          subtitle: _monthlyProduct != null ? "${_monthlyProduct!.price} / month" : (_productsLoaded ? "Unavailable right now" : "Loading..."),
           onTap: () => setState(() => _selectedPlan = 'monthly'),
         ),
       ],
@@ -422,7 +408,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            expiresText != null ? "Renews on $expiresText" : "Active subscription",
+            expiresText != null ? "Active until $expiresText (renews unless cancelled)" : "Active subscription",
             style: const TextStyle(color: Colors.white38, fontSize: 14),
           ),
           const SizedBox(height: 28),
@@ -454,7 +440,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  "Each generation uses coins from this balance",
+                  "Each image costs coins from this balance. Your daily allowance refills every UTC day.",
                   style: TextStyle(fontSize: 12, color: Colors.white38),
                   textAlign: TextAlign.center,
                 ),
@@ -470,9 +456,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          _buildFeatureRow(Icons.check_circle_rounded, "Unleash Full AI Potential"),
-          _buildFeatureRow(Icons.check_circle_rounded, "Priority Processing Speed"),
+          _buildFeatureRow(Icons.check_circle_rounded, "Bigger daily coin allowance"),
           _buildFeatureRow(Icons.check_circle_rounded, "Ad-Free Creative Workspace"),
+          _buildFeatureRow(Icons.check_circle_rounded, "Free watermark removal"),
           _buildFeatureRow(Icons.check_circle_rounded, "Exclusive Pro Prompt Styles"),
           const SizedBox(height: 24),
         ],

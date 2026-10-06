@@ -1,11 +1,26 @@
 project_id = "ylenfbneddyuzrkckaul"
 
-# Both functions verify the caller's Firebase ID token themselves (see
-# verifyFirebaseIdToken in each function) — Supabase's own gateway-level JWT
-# check must be disabled, otherwise it rejects the Firebase token before the
-# function code ever runs (UNAUTHORIZED_ASYMMETRIC_JWT / "Invalid JWT").
+# Every function verifies the caller's *Firebase* ID token itself (see
+# authenticate() in _shared/lib.ts). Supabase's own gateway-level JWT check must
+# be disabled, otherwise it rejects the Firebase token before our code runs.
 [functions.generate-image]
 verify_jwt = false
 
 [functions.confirm-purchase]
+verify_jwt = false
+
+[functions.economy]
+verify_jwt = false
+
+[functions.upload-image]
+verify_jwt = false
+
+[functions.mirror-image]
+verify_jwt = false
+
+[functions.split-prompts]
+verify_jwt = false
+
+# Called by Google's AdMob servers (signature-verified inside the function).
+[functions.admob-ssv]
 verify_jwt = false
