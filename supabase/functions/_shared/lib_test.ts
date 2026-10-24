@@ -141,9 +141,9 @@ Deno.test("codec round-trips all supported types", () => {
 });
 
 Deno.test("parseEconomy: falls back to defaults, accepts 0, ignores junk", () => {
-  assertEquals(parseEconomy(null).generationCost, 40);
+  assertEquals(parseEconomy(null).generationCost, 45);
   assertEquals(parseEconomy({ generationCost: 0 }).generationCost, 0);
-  assertEquals(parseEconomy({ generationCost: "abc" }).generationCost, 40);
+  assertEquals(parseEconomy({ generationCost: "abc" }).generationCost, 45);
   assertEquals(parseEconomy({ adRewardAmount: 12.0 }).adRewardAmount, 12);
   assertEquals(parseEconomy({ streakRewards: [1, 2, 3] }).streakRewards, [1, 2, 3]);
   assertEquals(parseEconomy({ streakRewards: [] }).streakRewards, DEFAULT_ECONOMY.streakRewards);

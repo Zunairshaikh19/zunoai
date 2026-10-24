@@ -417,17 +417,17 @@ export interface Economy {
 // Sized for: $0.04 per image, 40 coins per image, 80% net margin on premium
 // after the 15% Google Play fee.
 export const DEFAULT_ECONOMY: Economy = {
-  signupBonus: 40,
+  signupBonus: 45,
   referralReward: 20,
   referralCap: 10,
-  generationCost: 40,
+  generationCost: 45,
   adRewardAmount: 10,
-  dailyBonusFree: 5,
-  dailyBonusPremium: 52,
-  dailyBonusPremiumYearly: 33,
-  freeAdLimitPerDay: 3,
+  dailyBonusFree: 0,
+  dailyBonusPremium: 56,
+  dailyBonusPremiumYearly: 38,
+  freeAdLimitPerDay: 5,
   premiumAdLimitPerDay: 0,
-  watermarkRemovalCost: 20,
+  watermarkRemovalCost: 25,
   maxGenerationsPerDay: 60,
   streakRewards: [2, 2, 3, 3, 4, 5, 10],
 };

@@ -12,6 +12,7 @@ import '../../../providers/user_provider.dart';
 import '../../../providers/economy_provider.dart';
 import '../../../providers/purchase_provider.dart';
 import '../../../services/iap_service.dart';
+import '../../legal/presentation/privacy_policy_screen.dart';
 
 const String _kMonthlyProductId = 'zuno_premium_monthly';
 // Create both as subscriptions in Play Console (see PRODUCTION_CHECKLIST.md).
@@ -172,7 +173,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           ),
           const SizedBox(height: 18),
           const Text(
-            "More images,\nno ads, no waiting",
+            "More images,\nno ads",
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, height: 1.2, letterSpacing: -0.5),
           ),
@@ -191,7 +192,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           const SizedBox(height: 9),
           _buildValueRow(FontAwesomeIcons.ban, "No ads, free watermark removal", "Included"),
           const SizedBox(height: 22),
-          _buildPlanSelector(),
+          _buildPlanSelector(config),
           const SizedBox(height: 20),
           SizedBox(
             height: 54,
@@ -227,15 +228,47 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
               Text("Secure checkout", style: TextStyle(fontSize: 11, color: Colors.white38)),
             ],
           ),
+          const SizedBox(height: 10),
+          // Subscription disclosure: price, period, auto-renew and how to cancel.
+          Text(
+            _billingDisclosure(),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 10.5, color: Colors.white38, height: 1.4),
+          ),
           const SizedBox(height: 8),
-          TextButton(
-            onPressed: _isProcessing ? null : _restorePurchases,
-            child: const Text("Restore Purchases", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600, fontSize: 12)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TextButton(
+                onPressed: _isProcessing ? null : _restorePurchases,
+                child: const Text("Restore Purchases", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600, fontSize: 12)),
+              ),
+              const Text("·", style: TextStyle(color: Colors.white24)),
+              TextButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+                ),
+                child: const Text("Privacy Policy", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600, fontSize: 12)),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
         ],
       ),
     );
+  }
+
+  /// What the store requires us to say before charging: the real price, the
+  /// billing period, that it renews by itself, and where to cancel.
+  String _billingDisclosure() {
+    final product = _activeProduct;
+    final period = _selectedPlan == 'yearly' ? 'year' : 'month';
+    final price = product != null ? product.price : 'the price shown';
+    return "$price per $period, charged to your Google Play account. "
+        "Renews automatically every $period until you cancel. "
+        "To cancel: Google Play app → Menu → Payments & subscriptions → Subscriptions. "
+        "Cancelling stops the next renewal; you keep Premium until the paid period ends.";
   }
 
   String _ctaLabel() {
@@ -291,17 +324,32 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     );
   }
 
-  Widget _buildPlanSelector() {
+  /// "SAVE 33%" is about the PRICE (yearly vs 12 monthly payments). It is shown
+  /// only when both prices are known and yearly really is cheaper. The plan
+  /// cards also state images/month, because the yearly plan's daily allowance
+  /// is smaller, so the user is never misled into thinking it is "more".
+  String? _yearlySavingBadge() {
+    final m = _monthlyProduct, y = _yearlyProduct;
+    if (m == null || y == null || m.rawPrice <= 0) return null;
+    final pct = ((1 - y.rawPrice / (m.rawPrice * 12)) * 100).round();
+    return pct > 0 ? "SAVE $pct% ON PRICE" : null;
+  }
+
+  Widget _buildPlanSelector(EconomyConfig config) {
     final hasYearly = _yearlyProduct != null;
+    final monthlyImages = (config.dailyBonusPremium * 30 / config.generationCost).floor();
+    final yearlyImages = (config.dailyBonusPremiumYearly * 30 / config.generationCost).floor();
 
     return Column(
       children: [
         if (hasYearly) ...[
           _buildPlanCard(
             selected: _selectedPlan == 'yearly',
-            badge: "BEST VALUE",
+            badge: _yearlySavingBadge(),
             title: "Yearly",
-            subtitle: "${_yearlyProduct!.price} / year",
+            subtitle: "${_yearlyProduct!.price} / year · about ${_yearlyProduct!.currencySymbol}"
+                "${(_yearlyProduct!.rawPrice / 12).toStringAsFixed(2)} / month\n"
+                "${config.dailyBonusPremiumYearly} coins/day (~$yearlyImages images/mo)",
             onTap: () => setState(() => _selectedPlan = 'yearly'),
           ),
           const SizedBox(height: 10),
@@ -309,7 +357,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         _buildPlanCard(
           selected: _selectedPlan == 'monthly' || !hasYearly,
           title: "Monthly",
-          subtitle: _monthlyProduct != null ? "${_monthlyProduct!.price} / month" : (_productsLoaded ? "Unavailable right now" : "Loading..."),
+          subtitle: _monthlyProduct != null
+              ? "${_monthlyProduct!.price} / month\n${config.dailyBonusPremium} coins/day (~$monthlyImages images/mo)"
+              : (_productsLoaded ? "Unavailable right now" : "Loading..."),
           onTap: () => setState(() => _selectedPlan = 'monthly'),
         ),
       ],

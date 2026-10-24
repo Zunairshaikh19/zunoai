@@ -5,13 +5,13 @@
 ///
 /// These numbers are only for *display* — the server enforces the real ones.
 ///
-/// Sizing (image cost $0.04, 40 coins per image, Google Play fee 15%):
-///  * Premium monthly $9.99 -> 52 coins/day (+ streak) -> ~42 images/month max
-///    -> ~80% net margin.
-///  * Premium yearly $79.99 -> 33 coins/day (+ streak) -> ~28 images/month max
-///    -> ~80% net margin.
-///  * Free users earn ~1 image/day from ads + daily bonus; rewarded-ad revenue
-///    must cover that (needs roughly >= $13 eCPM; verify with real AdMob data).
+/// Sizing (image cost ~$0.0387 = 45 coins, ~$0.00086/coin, Google Play fee 15%):
+///  * Premium monthly $9.99 -> 56 coins/day (+ streak) -> ~37 images/month max
+///    -> ~82% net margin.
+///  * Premium yearly $79.99 -> 38 coins/day (+ streak) -> ~25 images/month max
+///    -> ~80.5% net margin.
+///  * Free users earn up to ~1 image/day from ads; rewarded-ad revenue must
+///    cover that (break-even eCPM ~ $8.6; verify with real AdMob data).
 class EconomyConfig {
   final int signupBonus;
   final int referralReward;
@@ -31,17 +31,17 @@ class EconomyConfig {
   final List<int> streakRewards;
 
   const EconomyConfig({
-    this.signupBonus = 40,
+    this.signupBonus = 45,
     this.referralReward = 20,
     this.referralCap = 10,
-    this.generationCost = 40,
+    this.generationCost = 45,
     this.adRewardAmount = 10,
-    this.dailyBonusFree = 5,
-    this.dailyBonusPremium = 52,
-    this.dailyBonusPremiumYearly = 33,
-    this.freeAdLimitPerDay = 3,
+    this.dailyBonusFree = 0,
+    this.dailyBonusPremium = 56,
+    this.dailyBonusPremiumYearly = 38,
+    this.freeAdLimitPerDay = 5,
     this.premiumAdLimitPerDay = 0,
-    this.watermarkRemovalCost = 20,
+    this.watermarkRemovalCost = 25,
     this.streakRewards = const [2, 2, 3, 3, 4, 5, 10],
   });
 
