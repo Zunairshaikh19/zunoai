@@ -21,6 +21,9 @@ verify_jwt = false
 [functions.split-prompts]
 verify_jwt = false
 
+[functions.migrate-prompt-images]
+verify_jwt = false
+
 # Called by Google's AdMob servers (signature-verified inside the function).
 [functions.admob-ssv]
 verify_jwt = false

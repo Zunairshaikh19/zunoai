@@ -59,6 +59,10 @@ android {
                 logger.warn("android/key.properties missing: release build will be UNSIGNED.")
             }
             isMinifyEnabled = false
+            // Flutter's plugin turns resource shrinking on for release by
+            // default, which fails when code shrinking is off. Keep both off
+            // until R8 rules are tested (see PRODUCTION_CHECKLIST.md).
+            isShrinkResources = false
         }
     }
 }

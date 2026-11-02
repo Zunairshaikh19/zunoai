@@ -25,8 +25,7 @@ import {
   utcDay,
 } from "../_shared/lib.ts";
 import { sniffImageMime } from "../_shared/image.ts";
-
-const IMGBB_API_KEY = Deno.env.get("IMGBB_API_KEY") ?? "";
+import { b64ToBytes, extFor, storageConfigured, storeImage } from "../_shared/storage.ts";
 
 // Used only if the admin hasn't picked a model in settings/config.generationModel.
 const DEFAULT_MODEL = "google/gemini-3.1-flash-image";
@@ -83,9 +82,6 @@ Deno.serve(async (req) => {
     const secret = await getDoc(`promptSecrets/${promptId}`);
     const category = String(promptDoc.category ?? "General");
     const hiddenPrompt = String(secret?.hiddenPrompt ?? promptDoc.hiddenPrompt ?? "").trim() || category;
-    const templateImageUrl = typeof promptDoc.imageUrl === "string" && promptDoc.imageUrl.startsWith("https://")
-      ? promptDoc.imageUrl
-      : undefined;
 
     // Provider key + model (admin-only doc, read with the service account).
     const config = await getDoc("settings/config");
@@ -93,7 +89,9 @@ Deno.serve(async (req) => {
     const model = typeof config?.generationModel === "string" && config.generationModel
       ? config.generationModel
       : DEFAULT_MODEL;
-    if (!apiKey) throw new HttpError(503, "Image generation is temporarily unavailable.", "NOT_CONFIGURED");
+    if (!apiKey || !storageConfigured()) {
+      throw new HttpError(503, "Image generation is temporarily unavailable.", "NOT_CONFIGURED");
+    }
 
     // ---- 1. Atomic charge ------------------------------------------------
     jobId = crypto.randomUUID().replaceAll("-", "");
@@ -159,7 +157,7 @@ Deno.serve(async (req) => {
         apiKey,
         ref1,
         ref2,
-        templateImageUrl,
+        storageKey: `generations/${uid}/${jobId}`,
       });
       imageUrl = result.imageUrl;
       lastError = result.error;
@@ -224,48 +222,42 @@ async function refund(uid: string, jobId: string, cost: number): Promise<boolean
   }
 }
 
+const IDENTITY_RULES =
+  `The final image MUST show the real person from the provided photo(s): keep their exact face, facial structure, ` +
+  `skin tone, hair, facial hair (beard/moustache), age and apparent gender clearly recognizable. ` +
+  `Do not beautify, age, de-age, or change their gender presentation or ethnicity.`;
+
 interface GenerateArgs {
   model: string;
   prompt: string;
   apiKey: string;
   ref1: Reference;
   ref2: Reference | null;
-  templateImageUrl?: string;
+  /** Object path without extension, e.g. generations/<uid>/<jobId>. */
+  storageKey: string;
 }
 
 async function tryGenerateViaOpenRouter(
-  { model, prompt, apiKey, ref1, ref2, templateImageUrl }: GenerateArgs,
+  { model, prompt, apiKey, ref1, ref2, storageKey }: GenerateArgs,
 ): Promise<{ imageUrl: string | null; error: string | null }> {
   try {
     const content: Record<string, unknown>[] = [];
-    const hasTemplate = !!templateImageUrl;
     const hasImage2 = !!ref2;
 
-    // Instruction text first, tailored to exactly which images are sent; then
-    // the images in the same order the text refers to them by.
+    // Only the user's photo(s) and the style's text prompt are sent to the model.
     let text: string;
-    if (hasTemplate && hasImage2) {
+    if (hasImage2) {
       text =
-        `Image 1 is a reference template showing two people together. Image 2 and Image 3 are real photos of two different people. ` +
-        `Recreate Image 1 exactly — same pose, clothing style, background, lighting, composition and framing — but replace the two subjects' faces and identities: ` +
-        `the person in Image 2 becomes the first/left subject, and the person in Image 3 becomes the second/right subject. ` +
-        `Preserve each person's real facial features, skin tone, and apparent gender exactly as shown in their own photo — do not swap, blend, or alter their gender presentation. ` +
-        `Style notes: ${prompt}`;
-    } else if (hasTemplate) {
-      text =
-        `Image 1 is a reference template image. Image 2 is a real photo of the actual person (or people) to feature. ` +
-        `Recreate Image 1 exactly — same pose, clothing style, background, lighting, composition and framing — but replace the subject's face and identity with the person shown in Image 2. ` +
-        `If Image 2 shows two people together, replace both subjects in Image 1 with those same two people, matching them left-to-right as they appear. ` +
-        `Preserve their real facial features, skin tone, and apparent gender exactly as shown in Image 2 — do not alter their gender presentation. ` +
-        `Style notes: ${prompt}`;
+        `Image 1 and Image 2 are real photos of two different people. Create this image featuring both of them: ${prompt}. ` +
+        `The first person from Image 1 and the second person from Image 2 must both appear, each looking exactly like their own photo. ` +
+        IDENTITY_RULES;
     } else {
       text =
-        `Using the person in the provided image as the subject, transform them into: ${prompt}. ` +
-        `Keep the person's identity, facial features, and apparent gender recognizable and unchanged.`;
+        `Create this image with the person in the provided photo as the main subject: ${prompt}. ` +
+        IDENTITY_RULES;
     }
     content.push({ type: "text", text });
 
-    if (hasTemplate) content.push({ type: "image_url", image_url: { url: templateImageUrl } });
     content.push({ type: "image_url", image_url: { url: `data:${ref1.mime};base64,${ref1.b64}` } });
     if (ref2) content.push({ type: "image_url", image_url: { url: `data:${ref2.mime};base64,${ref2.b64}` } });
 
@@ -295,29 +287,13 @@ async function tryGenerateViaOpenRouter(
       const dataUrl: string | undefined = images[0]?.image_url?.url;
       const base64 = dataUrl?.split(",")[1];
       if (base64) {
-        const imageUrl = await uploadToImgBB(base64);
-        return { imageUrl, error: imageUrl ? null : "ImgBB upload failed" };
+        const mime = sniffImageMime(base64) ?? "image/png";
+        const imageUrl = await storeImage(b64ToBytes(base64), mime, `${storageKey}.${extFor(mime)}`);
+        return { imageUrl, error: imageUrl ? null : "Image storage upload failed" };
       }
     }
     return { imageUrl: null, error: `No image in response: ${JSON.stringify(data).slice(0, 500)}` };
   } catch (e) {
     return { imageUrl: null, error: e instanceof Error ? e.message : String(e) };
   }
-}
-
-async function uploadToImgBB(base64Image: string): Promise<string | null> {
-  try {
-    const body = new URLSearchParams();
-    body.append("image", base64Image);
-    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-      method: "POST",
-      body,
-      signal: AbortSignal.timeout(30_000),
-    });
-    const data = await res.json();
-    if (res.ok && data.data?.url) return data.data.url as string;
-  } catch (_e) {
-    // upload failed
-  }
-  return null;
 }

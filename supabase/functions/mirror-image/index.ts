@@ -1,5 +1,5 @@
 // Admin-only proxy so the admin panel's "Bulk Upload JSON" can mirror
-// third-party prompt images to ImgBB without hitting browser CORS.
+// third-party prompt images to our own storage (R2) without hitting browser CORS.
 //
 // Why this exists: the admin panel is Flutter Web, and a browser tab can
 // display an <img> from almost any host, but it can't *read* that image's
@@ -18,8 +18,9 @@ import {
   json,
   requireBody,
 } from "../_shared/lib.ts";
+import { sniffImageMime } from "../_shared/image.ts";
+import { bytesToB64, extFor, isR2Url, storageConfigured, storeImage } from "../_shared/storage.ts";
 
-const IMGBB_API_KEY = Deno.env.get("IMGBB_API_KEY") ?? "";
 const MAX_BYTES = 8 * 1024 * 1024;
 
 /** Only public https URLs — never internal addresses (SSRF guard). */
@@ -55,24 +56,21 @@ Deno.serve(async (req) => {
       throw new HttpError(400, "imageUrl is required", "BAD_REQUEST");
     }
     const url = assertPublicHttps(body.imageUrl);
+    if (!storageConfigured()) throw new HttpError(503, "Storage is not configured", "NOT_CONFIGURED");
+    // Already on our own storage: nothing to mirror.
+    if (isR2Url(body.imageUrl)) return json({ success: true, imageUrl: body.imageUrl });
 
     const imgRes = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(30_000) });
     if (!imgRes.ok) throw new HttpError(502, `Source image fetch failed: HTTP ${imgRes.status}`, "FETCH_FAILED");
     const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
     if (imgBytes.length > MAX_BYTES) throw new HttpError(413, "Source image is too large", "IMAGE_TOO_LARGE");
 
-    const form = new FormData();
-    form.append("image", new Blob([imgBytes]), "prompt.jpg");
-    const uploadRes = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-      method: "POST",
-      body: form,
-      signal: AbortSignal.timeout(30_000),
-    });
-    const uploadData = await uploadRes.json().catch(() => ({}));
-    if (!uploadRes.ok || !uploadData?.data?.url) {
-      throw new HttpError(502, "ImgBB upload failed", "UPLOAD_FAILED");
-    }
-    return json({ success: true, imageUrl: uploadData.data.url as string });
+    const mime = sniffImageMime(bytesToB64(imgBytes.subarray(0, 24)));
+    if (!mime) throw new HttpError(400, "Source is not a JPG, PNG or WebP image", "BAD_IMAGE");
+
+    const stored = await storeImage(imgBytes, mime, `prompts/${crypto.randomUUID()}.${extFor(mime)}`);
+    if (!stored) throw new HttpError(502, "Image upload failed", "UPLOAD_FAILED");
+    return json({ success: true, imageUrl: stored });
   } catch (err) {
     return errorResponse(err);
   }
