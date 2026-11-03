@@ -23,11 +23,18 @@ final localCacheServiceProvider = Provider((ref) => LocalCacheService());
 final selectedCategoryProvider = StateProvider<String>((ref) => "All");
 
 class PromptsNotifier extends AsyncNotifier<List<ImagePrompt>> {
+  static const _cacheTtl = Duration(hours: 6);
+
   @override
   FutureOr<List<ImagePrompt>> build() async {
-    final cached = await ref.read(localCacheServiceProvider).getCachedPrompts();
+    final cache = ref.read(localCacheServiceProvider);
+    final cached = await cache.getCachedPrompts();
     if (cached.isNotEmpty) {
-      _fetchFromNetwork();
+      // Reading the whole prompts collection costs ~1 Firestore read per
+      // prompt, so only re-download it when the saved copy is stale. Pull to
+      // refresh (refresh()) always forces a fresh download.
+      final age = await cache.promptsCacheAge();
+      if (age == null || age > _cacheTtl) _fetchFromNetwork();
       return cached;
     }
     return _fetchFromNetwork();
