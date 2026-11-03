@@ -215,7 +215,7 @@ class CoinStoreScreen extends ConsumerWidget {
             icon: FontAwesomeIcons.userPlus,
             title: "Invite Friend",
             subtitle: "+$referralReward coins each",
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen(pushed: true))),
           ),
         ),
       ],

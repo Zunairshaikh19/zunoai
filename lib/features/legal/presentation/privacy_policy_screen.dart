@@ -51,21 +51,21 @@ class PrivacyPolicyScreen extends StatelessWidget {
             ]),
             _section("2. How your photos are used", [
               "When you generate an image, your reference photo is sent over the internet to our AI provider (OpenRouter) and the AI model provider behind it, only to create your image.",
-              "The finished image is hosted on ImgBB and shown to you through a web link. Anyone who has that link can open the image, so do not share it if you want it private.",
+              "The finished image is stored on Cloudflare (R2) and shown to you through a web link. Anyone who has that link can open the image, so do not share it if you want it private.",
               "Only upload photos of yourself or photos of people who have given you permission.",
             ]),
             _section("3. Services we use", [
               "Firebase (Google): sign-in and our database.",
               "Supabase: the servers that run image generation, coins and purchase checks.",
               "OpenRouter and its AI model providers: image generation.",
-              "ImgBB: image hosting.",
+              "Cloudflare R2: image storage and delivery.",
               "Google AdMob: rewarded and other ads for free users.",
               "Google Play Billing: subscriptions. We never see your card details.",
               "These services have their own privacy policies and may process data under them.",
             ]),
             _section("4. How long we keep it", [
               "Your account data and generation history stay until you delete them or delete your account.",
-              "Images already hosted on ImgBB may remain reachable through their link after deletion. To have a specific image removed, contact us.",
+              "Images already stored on Cloudflare may remain reachable through their link after deletion. To have a specific image removed, contact us.",
             ]),
             _section("5. Your rights", [
               "You can delete your account and data at any time from the Profile screen in the app, or by contacting us.",

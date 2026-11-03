@@ -12,6 +12,7 @@ import '../../../models/history_item.dart';
 import '../../../providers/root_index_provider.dart';
 import '../../../core/utils/watermark.dart';
 import '../../../core/utils/app_snackbar.dart';
+import '../../../core/utils/report_content.dart';
 import '../../../core/widgets/zuno_loader.dart';
 import '../../../core/widgets/zuno_error_view.dart';
 
@@ -240,6 +241,14 @@ class _MasterpiecePreviewScreenState extends ConsumerState<_MasterpiecePreviewSc
       body: SafeArea(
         child: Column(
           children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                icon: const FaIcon(FontAwesomeIcons.flag, size: 18, color: Colors.white70),
+                tooltip: "Report",
+                onPressed: () => showReportImageSheet(context, ref, widget.imageUrl),
+              ),
+            ),
             Expanded(
               child: InteractiveViewer(
                 child: Center(

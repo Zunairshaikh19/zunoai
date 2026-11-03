@@ -44,18 +44,26 @@ class _RootScreenState extends ConsumerState<RootScreen> {
     // hidden while it's showing.
     final isProfileTab = selectedIndex == 2;
 
-    return Scaffold(
-      extendBody: true, // Important for floating nav bar
-      body: IndexedStack(
-        index: selectedIndex,
-        children: _screens,
+    // System back on Saved/Profile goes to Explore first; only from Explore
+    // does it leave the app.
+    return PopScope(
+      canPop: selectedIndex == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) ref.read(rootIndexProvider.notifier).state = 0;
+      },
+      child: Scaffold(
+        extendBody: true, // Important for floating nav bar
+        body: IndexedStack(
+          index: selectedIndex,
+          children: _screens,
+        ),
+        bottomNavigationBar: isProfileTab
+            ? null
+            : _FloatingNavBar(
+                selectedIndex: selectedIndex,
+                onTap: (index) => ref.read(rootIndexProvider.notifier).state = index,
+              ),
       ),
-      bottomNavigationBar: isProfileTab
-          ? null
-          : _FloatingNavBar(
-              selectedIndex: selectedIndex,
-              onTap: (index) => ref.read(rootIndexProvider.notifier).state = index,
-            ),
     );
   }
 }

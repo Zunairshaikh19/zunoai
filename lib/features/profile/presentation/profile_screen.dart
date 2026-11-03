@@ -27,7 +27,11 @@ import '../../notifications/presentation/support_chat_screen.dart';
 import '../../../core/widgets/dynamic_icon.dart';
 
 class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({super.key});
+  /// True when opened with Navigator.push (e.g. from the coin store); false
+  /// when it is the Profile tab inside the root IndexedStack.
+  final bool pushed;
+
+  const ProfileScreen({super.key, this.pushed = false});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -42,7 +46,13 @@ class ProfileScreen extends ConsumerWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           tooltip: "Back to Dashboard",
-          onPressed: () => ref.read(rootIndexProvider.notifier).state = 0,
+          onPressed: () {
+            if (pushed) {
+              Navigator.of(context).pop();
+            } else {
+              ref.read(rootIndexProvider.notifier).state = 0;
+            }
+          },
         ),
         title: const Text("Profile", style: TextStyle(fontWeight: FontWeight.w900)),
         backgroundColor: Colors.transparent,

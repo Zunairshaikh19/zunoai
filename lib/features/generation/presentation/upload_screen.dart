@@ -14,6 +14,7 @@ import '../../../core/theme/app_colors.dart';
 import 'package:http/http.dart' as http;
 import 'package:gal/gal.dart';
 import '../../../core/utils/app_snackbar.dart';
+import '../../../core/utils/report_content.dart';
 import '../../../core/utils/watermark.dart';
 import '../../../services/analytics_service.dart';
 import '../../../services/ad_service.dart';
@@ -684,6 +685,11 @@ class _ResultView extends ConsumerWidget {
           onPressed: () => _leaveResult(ref),
         ),
         actions: [
+          IconButton(
+            icon: const FaIcon(FontAwesomeIcons.flag, size: 18),
+            tooltip: "Report",
+            onPressed: () => showReportImageSheet(context, ref, resultUrl),
+          ),
           IconButton(
             icon: const FaIcon(FontAwesomeIcons.xmark, size: 20),
             tooltip: "Close",
