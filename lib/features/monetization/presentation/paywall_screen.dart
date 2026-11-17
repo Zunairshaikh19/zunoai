@@ -13,6 +13,7 @@ import '../../../providers/economy_provider.dart';
 import '../../../providers/purchase_provider.dart';
 import '../../../services/iap_service.dart';
 import '../../legal/presentation/privacy_policy_screen.dart';
+import '../../legal/presentation/terms_screen.dart';
 
 const String _kMonthlyProductId = 'zuno_premium_monthly';
 // Create both as subscriptions in Play Console (see PRODUCTION_CHECKLIST.md).
@@ -178,20 +179,12 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
             style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, height: 1.2, letterSpacing: -0.5),
           ),
           const SizedBox(height: 8),
-          const Text(
-            "Premium gives you a bigger daily coin allowance every day.",
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white38, fontSize: 13),
-          ),
-          const SizedBox(height: 24),
-          _buildValueRow(FontAwesomeIcons.coins, "${config.dailyBonusPremium} coins every day (monthly)", "~${(config.dailyBonusPremium * 30 / config.generationCost).floor()} images/mo"),
-          const SizedBox(height: 9),
-          _buildValueRow(FontAwesomeIcons.coins, "${config.dailyBonusPremiumYearly} coins every day (yearly)", "~${(config.dailyBonusPremiumYearly * 30 / config.generationCost).floor()} images/mo"),
-          const SizedBox(height: 9),
-          _buildValueRow(FontAwesomeIcons.wandMagicSparkles, "Exclusive Pro styles", "Premium only"),
-          const SizedBox(height: 9),
-          _buildValueRow(FontAwesomeIcons.ban, "No ads, free watermark removal", "Included"),
           const SizedBox(height: 22),
+          _buildBenefit("More coins every day"),
+          _buildBenefit("Exclusive Pro styles"),
+          _buildBenefit("No ads"),
+          _buildBenefit("Free watermark removal"),
+          const SizedBox(height: 24),
           _buildPlanSelector(config),
           const SizedBox(height: 20),
           SizedBox(
@@ -229,6 +222,12 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
             ],
           ),
           const SizedBox(height: 10),
+          const Text(
+            "Monthly or yearly only. No weekly plans, no hidden charges.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: Colors.white54, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
           // Subscription disclosure: price, period, auto-renew and how to cancel.
           Text(
             _billingDisclosure(),
@@ -250,6 +249,14 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                   MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
                 ),
                 child: const Text("Privacy Policy", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600, fontSize: 12)),
+              ),
+              const Text("·", style: TextStyle(color: Colors.white24)),
+              TextButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const TermsScreen()),
+                ),
+                child: const Text("Terms", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600, fontSize: 12)),
               ),
             ],
           ),
@@ -300,25 +307,14 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     );
   }
 
-  Widget _buildValueRow(FaIconData icon, String label, String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-      ),
+  Widget _buildBenefit(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 12),
       child: Row(
         children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(color: AppColors.electricLime.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-            child: FaIcon(icon, size: 13, color: AppColors.electricLime),
-          ),
+          const Icon(Icons.check_circle_rounded, size: 18, color: AppColors.electricLime),
           const SizedBox(width: 12),
-          Expanded(child: Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700))),
-          Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.electricLime)),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
         ],
       ),
     );
@@ -336,30 +332,31 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   }
 
   Widget _buildPlanSelector(EconomyConfig config) {
-    final hasYearly = _yearlyProduct != null;
+    final y = _yearlyProduct;
+    final m = _monthlyProduct;
     final monthlyImages = (config.dailyBonusPremium * 30 / config.generationCost).floor();
     final yearlyImages = (config.dailyBonusPremiumYearly * 30 / config.generationCost).floor();
+    final unavailable = _productsLoaded ? "Unavailable right now" : "Loading...";
 
     return Column(
       children: [
-        if (hasYearly) ...[
-          _buildPlanCard(
-            selected: _selectedPlan == 'yearly',
-            badge: _yearlySavingBadge(),
-            title: "Yearly",
-            subtitle: "${_yearlyProduct!.price} / year · about ${_yearlyProduct!.currencySymbol}"
-                "${(_yearlyProduct!.rawPrice / 12).toStringAsFixed(2)} / month\n"
-                "${config.dailyBonusPremiumYearly} coins/day (~$yearlyImages images/mo)",
-            onTap: () => setState(() => _selectedPlan = 'yearly'),
-          ),
-          const SizedBox(height: 10),
-        ],
         _buildPlanCard(
-          selected: _selectedPlan == 'monthly' || !hasYearly,
+          selected: _selectedPlan == 'yearly',
+          badge: _yearlySavingBadge(),
+          title: "Yearly",
+          subtitle: y != null
+              ? "${y.price} / year · about ${y.currencySymbol}${(y.rawPrice / 12).toStringAsFixed(2)} / month\n"
+                  "${config.dailyBonusPremiumYearly} coins/day (~$yearlyImages images/mo)"
+              : unavailable,
+          onTap: () => setState(() => _selectedPlan = 'yearly'),
+        ),
+        const SizedBox(height: 10),
+        _buildPlanCard(
+          selected: _selectedPlan == 'monthly',
           title: "Monthly",
-          subtitle: _monthlyProduct != null
-              ? "${_monthlyProduct!.price} / month\n${config.dailyBonusPremium} coins/day (~$monthlyImages images/mo)"
-              : (_productsLoaded ? "Unavailable right now" : "Loading..."),
+          subtitle: m != null
+              ? "${m.price} / month\n${config.dailyBonusPremium} coins/day (~$monthlyImages images/mo)"
+              : unavailable,
           onTap: () => setState(() => _selectedPlan = 'monthly'),
         ),
       ],

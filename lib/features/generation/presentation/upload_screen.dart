@@ -244,11 +244,12 @@ class UploadScreen extends ConsumerWidget {
       imageQuality: 80,
     );
     if (pickedFile != null) {
+      final file = File(pickedFile.path);
       final notifier = ref.read(generationNotifierProvider.notifier);
       if (slot2) {
-        notifier.setImage2(File(pickedFile.path));
+        notifier.setImage2(file);
       } else {
-        notifier.setImage(File(pickedFile.path));
+        notifier.setImage(file);
       }
     }
   }
@@ -437,7 +438,10 @@ class UploadScreen extends ConsumerWidget {
                     foregroundColor: Colors.black,
                     shape: const StadiumBorder(),
                   ),
-                  child: const Text("Generate", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  child: Text(
+                    "Generate · ${(ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig()).generationCost} coins",
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
           ],

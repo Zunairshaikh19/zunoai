@@ -12,8 +12,8 @@ import '../../../core/utils/app_snackbar.dart';
 import '../../../services/api_client.dart';
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../legal/presentation/privacy_policy_screen.dart';
+import '../../legal/presentation/terms_screen.dart';
 import '../../generation/presentation/history_screen.dart';
-import '../../saved/presentation/saved_list_screen.dart';
 
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -63,9 +63,6 @@ class ProfileScreen extends ConsumerWidget {
 
           final creationsCount = ref.watch(historyProvider(user.uid)).valueOrNull?.length ?? 0;
           final savedCount = ref.watch(savedPromptsProvider).length;
-          final weeklyCount = ref.watch(historyProvider(user.uid)).valueOrNull?.where(
-                (h) => h.timestamp.isAfter(DateTime.now().subtract(const Duration(days: 7))),
-              ).length ?? 0;
 
           return SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
@@ -74,17 +71,9 @@ class ProfileScreen extends ConsumerWidget {
               children: [
                 _buildHeader(context, ref, user),
                 const SizedBox(height: 16),
-                _buildStreakBanner(user),
-                const SizedBox(height: 16),
-                _buildAchievements(user, creationsCount),
-                const SizedBox(height: 16),
                 _buildStatsRow(user, creationsCount, savedCount),
                 const SizedBox(height: 16),
                 _buildReferralCard(context, user, ref, config),
-                const SizedBox(height: 16),
-                _buildQuickActions(context),
-                const SizedBox(height: 16),
-                _buildWeeklyActivity(weeklyCount),
                 const SizedBox(height: 16),
                 _buildSettingsList(context, ref),
               ],
@@ -198,115 +187,6 @@ class ProfileScreen extends ConsumerWidget {
           ),
       ],
     );
-  }
-
-  Widget _buildStreakBanner(UserModel user) {
-    final streak = user.loginStreak;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.orange.withValues(alpha: 0.14), AppColors.electricLime.withValues(alpha: 0.05)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          const Text("🔥", style: TextStyle(fontSize: 26)),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("$streak-day streak", style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
-                const Text("Come back tomorrow to keep it alive", style: TextStyle(fontSize: 11.5, color: Colors.white38)),
-              ],
-            ),
-          ),
-          Row(
-            children: List.generate(4, (i) {
-              final filled = i < streak.clamp(0, 4);
-              return Padding(
-                padding: const EdgeInsets.only(left: 3),
-                child: Container(
-                  width: 5,
-                  height: 18,
-                  decoration: BoxDecoration(
-                    color: filled ? AppColors.electricLime : Colors.white.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-              );
-            }),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAchievements(UserModel user, int creationsCount) {
-    final badges = [
-      (icon: "🔥", label: "7-Day Streak", unlocked: user.loginStreak >= 7),
-      (icon: "creator", label: "Creator", unlocked: creationsCount >= 10),
-      (icon: "referral", label: "Referral Pro", unlocked: user.referralCount >= 5),
-      (icon: "premium", label: "Premium", unlocked: user.tier == UserTier.paid),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text("ACHIEVEMENTS", style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Colors.white38, letterSpacing: 1.1)),
-        const SizedBox(height: 8),
-        Row(
-          children: badges.map((b) {
-            return Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Opacity(
-                  opacity: b.unlocked ? 1 : 0.4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: b.unlocked ? AppColors.electricLime.withValues(alpha: 0.25) : Colors.white.withValues(alpha: 0.08)),
-                    ),
-                    child: Column(
-                      children: [
-                        _achievementIcon(b.icon, b.unlocked),
-                        const SizedBox(height: 6),
-                        Text(
-                          b.label,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: b.unlocked ? 0.8 : 0.5)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _achievementIcon(String kind, bool unlocked) {
-    final color = unlocked ? AppColors.electricLime : Colors.white54;
-    switch (kind) {
-      case "🔥":
-        return const Text("🔥", style: TextStyle(fontSize: 16));
-      case "creator":
-        return FaIcon(FontAwesomeIcons.wandMagicSparkles, size: 15, color: color);
-      case "referral":
-        return FaIcon(FontAwesomeIcons.userGroup, size: 15, color: color);
-      default:
-        return FaIcon(FontAwesomeIcons.crown, size: 15, color: color);
-    }
   }
 
   Widget _buildStatsRow(UserModel user, int creationsCount, int savedCount) {
@@ -428,75 +308,6 @@ class ProfileScreen extends ConsumerWidget {
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActions(BuildContext context) {
-    final actions = [
-      (icon: FontAwesomeIcons.images, label: "Creations", builder: (BuildContext c) => const HistoryScreen()),
-      (icon: FontAwesomeIcons.bookmark, label: "Saved", builder: (BuildContext c) => const SavedListScreen()),
-      (icon: FontAwesomeIcons.solidBell, label: "Alerts", builder: (BuildContext c) => const NotificationsScreen()),
-      (icon: FontAwesomeIcons.shieldHalved, label: "Privacy", builder: (BuildContext c) => const PrivacyPolicyScreen()),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text("QUICK ACTIONS", style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Colors.white38, letterSpacing: 1.1)),
-        const SizedBox(height: 8),
-        Row(
-          children: actions.map((a) {
-            return Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: a.builder)),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-                    ),
-                    child: Column(
-                      children: [
-                        FaIcon(a.icon, size: 17, color: Colors.white70),
-                        const SizedBox(height: 6),
-                        Text(a.label, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white70)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildWeeklyActivity(int weeklyCount) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-      ),
-      child: Row(
-        children: [
-          const FaIcon(FontAwesomeIcons.boltLightning, size: 17, color: AppColors.electricLime),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Text(
-              weeklyCount == 0
-                  ? "No generations yet this week"
-                  : "$weeklyCount generation${weeklyCount == 1 ? '' : 's'} this week",
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
-            ),
-          ),
         ],
       ),
     );
@@ -637,6 +448,38 @@ class ProfileScreen extends ConsumerWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const SupportChatScreen()),
+            ),
+          ),
+          _buildSettingsTile(
+            icon: FontAwesomeIcons.images,
+            title: "My Creations",
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const HistoryScreen()),
+            ),
+          ),
+          _buildSettingsTile(
+            icon: FontAwesomeIcons.solidBell,
+            title: "Notifications",
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+            ),
+          ),
+          _buildSettingsTile(
+            icon: FontAwesomeIcons.shieldHalved,
+            title: "Privacy Policy",
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const PrivacyPolicyScreen()),
+            ),
+          ),
+          _buildSettingsTile(
+            icon: FontAwesomeIcons.fileContract,
+            title: "Terms of Use",
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const TermsScreen()),
             ),
           ),
           _buildSettingsTile(
