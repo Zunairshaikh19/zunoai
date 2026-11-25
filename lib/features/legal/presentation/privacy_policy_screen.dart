@@ -3,7 +3,7 @@ import '../../../core/theme/app_colors.dart';
 
 // TODO(owner): replace with the real support email before release, and use the
 // same address in the Play Console listing and the hosted privacy policy.
-const String kSupportEmail = 'contact@zunoai.example.com';
+const String kSupportEmail = 'aizutechnologies37@gmail.com';
 
 class PrivacyPolicyScreen extends StatelessWidget {
   const PrivacyPolicyScreen({super.key});

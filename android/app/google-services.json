@@ -7,6 +7,43 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:31792471355:android:0879a00646bd9fe2576b1e",
+        "android_client_info": {
+          "package_name": "com.aizu.zunoai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "31792471355-k3p9cen1jghts8vu0dg40r0fnofhgce3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aizu.zunoai",
+            "certificate_hash": "2b9a64ff8d5c4306c25aadad8b5e1ff9a27409f0"
+          }
+        },
+        {
+          "client_id": "31792471355-1ftg0vibel7bf6c86v896509og3mgqr8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApZ8D-OQ74jLd5naZQnYp5daBfpD_eBjc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "31792471355-1ftg0vibel7bf6c86v896509og3mgqr8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:31792471355:android:f78fd4b5039fb4ac576b1e",
         "android_client_info": {
           "package_name": "com.example.zunoai"

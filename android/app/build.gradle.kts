@@ -15,6 +15,8 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
+    // namespace = where the Kotlin sources/R class live (internal). It is NOT the
+    // Play package name; that is applicationId below.
     namespace = "com.zunoai.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
@@ -26,7 +28,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.zunoai.app"
+        applicationId = "com.aizu.zunoai"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
