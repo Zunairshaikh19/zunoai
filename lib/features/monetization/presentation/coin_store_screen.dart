@@ -11,6 +11,7 @@ import '../../../models/economy_config.dart';
 import '../../../core/utils/app_snackbar.dart';
 import '../../../core/widgets/zuno_loader.dart';
 import '../../../core/widgets/zuno_error_view.dart';
+import '../../../core/widgets/guest_sign_in_prompt.dart';
 import '../../profile/presentation/profile_screen.dart';
 import 'paywall_screen.dart';
 
@@ -29,7 +30,12 @@ class CoinStoreScreen extends ConsumerWidget {
       ),
       body: userAsync.when(
         data: (user) {
-          if (user == null) return const Center(child: Text("Please log in"));
+          if (user == null) {
+            return const GuestSignInPrompt(
+              title: 'Sign in to open your Vault',
+              message: 'Sign in to earn coins, watch rewarded ads and manage your balance.',
+            );
+          }
 
           final adLimit = user.isPremium ? config.premiumAdLimitPerDay : config.freeAdLimitPerDay;
           final canWatchAd = user.dailyAdsWatched < adLimit;

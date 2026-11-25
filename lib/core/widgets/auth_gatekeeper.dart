@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../features/auth/presentation/login_screen.dart';
+import '../../models/economy_config.dart';
+import '../../providers/economy_provider.dart';
 import '../../services/analytics_service.dart';
 import '../theme/app_colors.dart';
 
@@ -27,12 +30,15 @@ class AuthGatekeeper {
   }
 }
 
-class _AuthGateModal extends StatelessWidget {
+class _AuthGateModal extends ConsumerWidget {
   final String actionName;
   const _AuthGateModal({required this.actionName});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Quote the real signup bonus from the live economy config, never a
+    // hard-coded number that can drift from the admin Settings.
+    final config = ref.watch(economyConfigProvider).valueOrNull ?? const EconomyConfig();
     return Container(
       padding: EdgeInsets.only(
         left: 24,
@@ -80,10 +86,10 @@ class _AuthGateModal extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
-            "Create an account or sign in to claim your 40 free daily coins and start generating AI artwork.",
+          Text(
+            "Create an account or sign in to get ${config.signupBonus} free coins and start generating AI artwork.",
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
               color: Colors.white60,
               fontSize: 14,
               height: 1.4,

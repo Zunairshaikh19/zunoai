@@ -716,7 +716,15 @@ class _ResultView extends ConsumerWidget {
                         imageUrl: resultUrl,
                         width: double.infinity,
                         fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(color: AppColors.surface),
+                        placeholder: (context, url) => Container(
+                          color: AppColors.surface,
+                          alignment: Alignment.center,
+                          child: const SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.electricLime),
+                          ),
+                        ),
                       ),
                       if (!genState.watermarkRemoved)
                         const Positioned(

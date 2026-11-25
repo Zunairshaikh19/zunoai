@@ -55,7 +55,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
               "Only upload photos of yourself or photos of people who have given you permission.",
             ]),
             _section("3. Services we use", [
-              "Firebase (Google): sign-in and our database.",
+              "Firebase (Google): sign-in, our database, push notifications and Firebase Analytics (basic app usage statistics, such as which screens are opened).",
               "Supabase: the servers that run image generation, coins and purchase checks.",
               "OpenRouter and its AI model providers: image generation.",
               "Cloudflare R2: image storage and delivery.",
@@ -68,11 +68,11 @@ class PrivacyPolicyScreen extends StatelessWidget {
               "Images already stored on Cloudflare may remain reachable through their link after deletion. To have a specific image removed, contact us.",
             ]),
             _section("5. Your rights", [
-              "You can delete your account and data at any time from the Profile screen in the app, or by contacting us.",
+              "You can delete your account and data at any time from the Profile screen in the app. If you cannot open the app, email us from the address you signed up with and we will delete your account and data within 7 days.",
               "Deleting your account does not cancel a Google Play subscription. Cancel it in Google Play first (Menu → Payments & subscriptions → Subscriptions).",
             ]),
             _section("6. Children", [
-              "Zuno AI is not meant for children under 13, and we do not knowingly collect their data.",
+              "Zuno AI is intended for people aged 18 and over. We do not knowingly collect data from anyone under 18.",
             ]),
             const Center(
               child: Text(

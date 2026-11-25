@@ -25,6 +25,7 @@ import '../../monetization/presentation/paywall_screen.dart';
 
 import '../../notifications/presentation/support_chat_screen.dart';
 import '../../../core/widgets/dynamic_icon.dart';
+import '../../../core/widgets/guest_sign_in_prompt.dart';
 
 class ProfileScreen extends ConsumerWidget {
   /// True when opened with Navigator.push (e.g. from the coin store); false
@@ -59,7 +60,12 @@ class ProfileScreen extends ConsumerWidget {
       ),
       body: userAsync.when(
         data: (user) {
-          if (user == null) return const Center(child: Text("Not Logged In"));
+          if (user == null) {
+            return const GuestSignInPrompt(
+              title: 'Sign in to your profile',
+              message: 'Sign in to see your coins, creations and saved styles.',
+            );
+          }
 
           final creationsCount = ref.watch(historyProvider(user.uid)).valueOrNull?.length ?? 0;
           final savedCount = ref.watch(savedPromptsProvider).length;
